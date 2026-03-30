@@ -77,8 +77,12 @@ class MainUser extends Authenticatable
         'status',
         'web_token',
         'social_type',
+        'is_guest_user',
 
     ];
+
+    protected $table = 'main_users';
+
 
     /**
      * The attributes that should be hidden for arrays.
@@ -99,6 +103,7 @@ class MainUser extends Authenticatable
      */
     protected $casts = [
         'email_verified_at' => 'datetime',
+        'is_guest_user' => 'boolean',
     ];
 
     /**
@@ -107,7 +112,7 @@ class MainUser extends Authenticatable
      * @var array
      */
     protected $appends = [
-      
+
     ];
 
     // relation with Permissions

@@ -56,6 +56,53 @@ class WebsiteLoginController extends Controller
         return Socialite::driver('google')->stateless()->redirect();
     }
 
+    /**
+     * Show the guest user login page.
+     */
+    public function showGuestLoginForm()
+    {
+        $redirectTo = url()->previous();
+        return view('frontend.auth.guest_login', compact('redirectTo'));
+    }
+
+    /**
+     * Handle guest user login and store in MainUser table.
+     */
+    public function guestLogin(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'name' => 'required|string|max:255',
+            'age' => 'required|integer|min:18',
+            'email' => 'required|email|max:255|unique:main_users,email',
+            'phone' => 'required|string|max:20|unique:main_users,phone',
+        ]);
+
+        if ($validator->fails()) {
+            return redirect()->back()->withErrors($validator)->withInput();
+        }
+
+        $uniqid = uniqid();
+        $user = MainUser::create([
+            'uniqid' => $uniqid,
+            'name' => $request->name,
+            'age' => $request->age,
+            'email' => $request->email,
+            'phone' => $request->phone,
+            'is_guest_user' => true,
+            'status' => 1,
+            'is_verify_user' => 1,
+        ]);
+
+        Auth::guard('user')->login($user);
+        session()->flash('success', 'Logged in as guest user successfully.');
+        // return redirect()->route('frontend.home');
+        if ($request->filled('redirect_to') && !str_contains($request->redirect_to, 'guest-login')) {
+        return redirect($request->redirect_to);
+    }
+
+    return redirect()->route('frontend.home');
+    }
+
     public function handleGoogleCallback()
     {
 

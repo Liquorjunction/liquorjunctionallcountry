@@ -2364,7 +2364,7 @@ INSERT INTO `labels` (`id`, `language_id`, `label_name`, `label_value`, `label_v
 (529, 2, 'total_amount_label', 'Total Amount', 'Montant total', 1, 1, NULL, '2023-11-22 06:20:59', '2023-11-22 06:20:59'),
 (530, 2, 'recently_viewed', 'Recently Viewed', 'vu récemment', 1, 1, NULL, '2023-11-22 06:22:16', '2023-11-22 06:22:16'),
 (531, 2, 'top_selling_products_label', 'Top Selling Products', 'Produits les plus vendus', 1, 1, NULL, '2023-11-22 06:24:04', '2023-11-22 06:24:04'),
-(532, 2, 'go_to_checkout', 'Go to checkout', 'Aller à la caisse', 1, 1, NULL, '2023-11-22 06:25:52', '2023-11-22 06:25:52'),
+(532, 2, 'go_to_checkout', 'Go to checkout', 'payer en tant qu'invité', 1, 1, NULL, '2023-11-22 06:25:52', '2023-11-22 06:25:52'),
 (533, 2, 'online_label_web', 'Online', 'En ligne', 1, 1, NULL, '2023-11-22 06:35:47', '2023-11-22 06:35:47'),
 (534, 2, 'pickup_order', 'Pickup Order', 'Commande de ramassage', 1, 1, NULL, '2023-11-22 06:36:36', '2023-11-22 06:36:36'),
 (535, 2, 'address_label', 'Address', 'Adresse', 1, 1, NULL, '2023-11-22 06:37:37', '2023-11-22 06:37:37'),
@@ -2573,6 +2573,7 @@ INSERT INTO `labels` (`id`, `language_id`, `label_name`, `label_value`, `label_v
 (738, 2, 'your_order_inprogress', 'Your order is in-progress', 'Votre commande est en cours', 0, 1, NULL, '2024-01-31 11:28:10', '2024-01-31 11:28:10'),
 (739, 2, 'please_select_store', 'Please select store', 'Veuillez sélectionner un magasin', 0, 1, NULL, '2024-02-01 07:20:54', '2024-02-01 07:20:54'),
 (740, 2, 'note', 'Note', 'Note', 0, 1, NULL, '2024-05-01 11:42:26', '2024-05-01 11:42:26');
+(741, 2, 'checkout_as_guest', 'Checkout as guest', 'Aller à la caisse', 0, 1, NULL, '2023-11-22 06:25:52', '2023-11-22 06:25:52'),
 
 -- --------------------------------------------------------
 

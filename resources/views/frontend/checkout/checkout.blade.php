@@ -1186,6 +1186,7 @@
                 </div>
 
                 {{-- Reward Points --}}
+               @if(auth()->guard('user')->check() && !auth()->guard('user')->user()->is_guest_user)
                 <div class="form-group mb-30">
                     <div class="collapsible-header" onclick="toggleRewardSection()">▶ Apply Reward Points </div>
 
@@ -1227,7 +1228,7 @@
                         </div>
                     </div>
                 </div>
-
+                @endif
 
                 <div class="form-group mb-30">
                     <h6>Gift Message</h6>

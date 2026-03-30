@@ -702,7 +702,7 @@ class MyProfileController extends Controller
         $cartdata = \DB::table('cart')->where('user_id', $user_id)->where('status', 1)->get();
 
         $userdata = \DB::table('main_users')->where('id', $user_id)->first();
-        
+
         if (!empty($cartdata) && count($cartdata) > 0) {
             //$ismail = $this->attachment_remind_order($userdata->email, $userdata->name);
             Auth::guard('user')->logout();
@@ -711,7 +711,13 @@ class MyProfileController extends Controller
             Auth::guard('user')->logout();
             Session::flush();
         }
-        MainUser::where('id', $user_id)->update(['remember_token' => $userdata->remember_token ]);
+
+        if($userdata->remember_token == null){
+            $remember_token = \Str::random(64);
+            MainUser::where('id', $user_id)->update(['remember_token' => $remember_token ]);
+        }else{
+            MainUser::where('id', $user_id)->update(['remember_token' => $userdata->remember_token ]);
+        }
         /*\Cookie::queue(\Cookie::forget('admin_email'));
         \Cookie::queue(\Cookie::forget('admin_password'));*/
         return response()->json(['success' => 'true']);
