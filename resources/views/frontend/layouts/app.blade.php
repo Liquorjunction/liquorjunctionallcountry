@@ -3,6 +3,18 @@
 @yield('content')
 @include('frontend.layouts.footer')
 @include('frontend.layouts.foot')
+<style>
+/* Shake animation for Add to Cart button */
+.shake {
+  animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+}
+@keyframes shake {
+  10%, 90% { transform: translateX(-2px); }
+  20%, 80% { transform: translateX(4px); }
+  30%, 50%, 70% { transform: translateX(-8px); }
+  40%, 60% { transform: translateX(8px); }
+}
+</style>
 @stack('after-scripts')
 
     

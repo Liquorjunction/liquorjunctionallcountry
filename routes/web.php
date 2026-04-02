@@ -17,6 +17,7 @@ use App\Http\Controllers\Frontend\StoreMapController;
 use App\Http\Controllers\Frontend\BlogController;
 use App\Http\Controllers\Frontend\OrderController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Frontend\CartApiController;
 
 /*
 |--------------------------------------------------------------------------
@@ -148,6 +149,10 @@ Route::middleware(['PreventBackHistory'])->group(function () {
         Route::post('/cart-ordertype', [CartController::class, 'productCartOrderType'])->name('cartordertype');
         Route::post('/buy-now', [CartController::class, 'productBuyNow'])->name('buy-now');
         Route::post('/buy-now-session', [CartController::class, 'buyNowSession'])->name('buyNowSession');
+
+        // Cart data for AJAX cart updates (web route)
+        Route::get('cart/data', [CartApiController::class, 'getCartData'])->name('cart.data');
+        Route::delete('cart/item/{id}', [CartApiController::class, 'deleteCartItem'])->name('cart.item.delete');
 
 
         Route::get('/checkout-cancel.', [CheckoutController::class, 'Checkout'])->name('checkout.cancel');

@@ -82,6 +82,9 @@ class WebsiteLoginController extends Controller
         }
 
         $uniqid = uniqid();
+        $otp = mt_rand(1000, 9999);
+        $otp_expire_time = now()->addMinutes(5);
+
         $user = MainUser::create([
             'uniqid' => $uniqid,
             'name' => $request->name,
@@ -89,20 +92,30 @@ class WebsiteLoginController extends Controller
             'email' => $request->email,
             'phone' => $request->phone,
             'is_guest_user' => true,
-            'status' => 1,
-            'is_verify_user' => 1,
+            'status' => 2, // Pending verification
+            'is_verify_user' => 0,
+            'otp' => $otp,
+            'otp_expire_time' => $otp_expire_time,
         ]);
 
-        Auth::guard('user')->login($user);
-        session()->flash('success', 'Logged in as guest user successfully.');
-        // return redirect()->route('frontend.home');
-        if ($request->filled('redirect_to') && !str_contains($request->redirect_to, 'guest-login')) {
-        return redirect($request->redirect_to);
-    }
+        // Send OTP via email (reuse logic from websiteRegister)
+        $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
+        $url_link = \URL::to("/");
+        $url = $url_link . '/';
+        $email = $user->email;
+        $name = $user->name;
+        try {
+            $this->attachment_otp_email($email, $otp, $name, $url, $logo);
+        } catch (\Exception $e) {
+            // Log error if needed
+        }
 
-    return redirect()->route('frontend.home');
-    }
+        // Store guest user id in session for OTP verification
+        session(['guest_otp_user_id' => $user->id]);
 
+        // Redirect to guest OTP verification page (create this route/view)
+        return redirect()->route('websitesendotp');
+    }
     public function handleGoogleCallback()
     {
 
@@ -372,27 +385,36 @@ class WebsiteLoginController extends Controller
 
     public function websiteRegister(Request $request)
     {
-
-
         if ($request->ajax()) {
+            $isGuest = $request->input('is_guest_user') == 1;
             $response = 1;
             $password = $request->input('password');
             $confirm_password = $request->input('confirm_password');
 
-            $validator = \Validator::make(
-                $request->all(),
-                [
+            // Validation rules
+            if ($isGuest) {
+                $rules = [
                     'first_name' => ['required', 'min:3', 'max:30'],
                     'last_name' => ['required', 'min:3', 'max:30'],
                     'age' => ['required', 'integer', 'min:18', 'max:100'],
                     'email' => [
                         'required',
                         'email',
-                        // Rule::unique('main_users')
-                        //     ->where(function ($query) {
-                        //         return $query->where('status', '!=', '2')->where('is_otp_verify', 1);
-                        //     })
-
+                    ],
+                    'phone' => [
+                        'required',
+                        'min:8',
+                        'max:15',
+                    ],
+                ];
+            } else {
+                $rules = [
+                    'first_name' => ['required', 'min:3', 'max:30'],
+                    'last_name' => ['required', 'min:3', 'max:30'],
+                    'age' => ['required', 'integer', 'min:18', 'max:100'],
+                    'email' => [
+                        'required',
+                        'email',
                         Rule::unique('main_users', 'email')
                             ->where(function ($query) {
                                 return $query->where('status', '!=', '2')
@@ -407,78 +429,94 @@ class WebsiteLoginController extends Controller
                             return $query->where('status', '!=', '2')->where('is_otp_verify', 1);
                         })
                     ],
-                    'password' => 'required|min:6',
-                    'confirm_password' => 'required|same:password|min:6'
-                ],
-                [
-                    'first_name.required' => \Helper::language('first_name_required'),
-                    'first_name.min' => \Helper::language('first_name_min_valiadation_msg'),
-                    'first_name.max' => \Helper::language('first_name_max_validation'),
+                ];
+            }
+            $messages = [
+                'first_name.required' => \Helper::language('first_name_required'),
+                'first_name.min' => \Helper::language('first_name_min_valiadation_msg'),
+                'first_name.max' => \Helper::language('first_name_max_validation'),
+                'last_name.required' => \Helper::language('last_name_field_is_required'),
+                'last_name.min' => \Helper::language('last_name_min_valiadation_msg'),
+                'last_name.max' => \Helper::language('last_name_max_validation'),
+                'age.required' => 'Age field is required',
+                'age.min' => 'Minimum age allowed is 18',
+                'age.max' => 'Maximum age allowed is 100',
+                'email.required' => \Helper::language('email_field_required'),
+                'email.email' => \Helper::language('enter_valid_email_validation'),
+                'phone.required' => \Helper::language('phone_number_field_is_required'),
+                'phone.min' => \Helper::language('phone_number_min_max'),
+                'phone.max' => \Helper::language('phone_number_min_max'),
+                'phone.unique' => 'The phone number already exists',
+            ];
+            if (!$isGuest) {
+                $rules['password'] = 'required|min:6';
+                $rules['confirm_password'] = 'required|same:password|min:6';
+                $messages['password.required'] = \Helper::language('password_field_required_validation');
+                $messages['password.min'] = \Helper::language('password_length');
+                $messages['confirm_password.required'] = \Helper::language('confirm_password_required');
+                $messages['confirm_password.min'] = \Helper::language('confirm_password_len');
+                $messages['confirm_password.same'] = 'The password and confirm password field does not match.';
+            }
 
-                    'last_name.required' => \Helper::language('last_name_field_is_required'),
-                    'last_name.min' => \Helper::language('last_name_min_valiadation_msg'),
-                    'last_name.max' => \Helper::language('last_name_max_validation'),
-
-                    'age.required' => 'Age field is required',
-                    'age.min' => 'Minimum age allowed is 18',
-                    'age.max' => 'Maximum age allowed is 100',
-
-                    'email.required' => \Helper::language('email_field_required'),
-                    'email.email' => \Helper::language('enter_valid_email_validation'),
-
-                    'phone.required' => \Helper::language('phone_number_field_is_required'),
-                    'phone.min' => \Helper::language('phone_number_min_max'),
-                    'phone.max' => \Helper::language('phone_number_min_max'),
-                    // 'phone.exists' => 'The phone number already exits',
-                    'phone.unique' => 'The phone number already exists',
-
-                    'password.required' => \Helper::language('password_field_required_validation'),
-                    //'password.confirmed' => 'The password and confirm password field does not match.',
-                    'password.min' => \Helper::language('password_length'),
-
-                    'confirm_password.required' => \Helper::language('confirm_password_required'),
-                    'confirm_password.min' => \Helper::language('confirm_password_len'),
-                    'confirm_password.same' => 'The password and confirm password field does not match.',
-                ]
-            );
-
+            $validator = \Validator::make($request->all(), $rules, $messages);
             if ($validator->fails()) {
                 return response()->json($validator->errors(), 422);
             }
 
+            // Check if user exists
             $userExist = MainUser::where(function ($query) use ($request) {
                 $query->where('email', $request->email)
                     ->orWhere('phone', $request->phone);
-            })
-                ->first();
+            })->first();
 
             if ($userExist) {
-                $errors = [];
+                if ($isGuest && $userExist->is_guest_user) {
+                    if ($userExist->is_otp_verify == 1) {
+                        // Already verified guest user, log in and redirect
+                        Auth::guard('user')->login($userExist);
+                        return response()->json(['success' => 'true', 'redirect' => route('frontend.home')]);
+                    } else {
+                        // If guest user exists, just log in and send OTP again
+                        $otp = mt_rand(1000, 9999);
+                        $userExist->otp = $otp;
+                        $userExist->otp_expire_time = now()->addMinutes(5)->toDateTimeString();
+                        $userExist->save();
 
-                if ($userExist->email === $request->email) {
-                    $errors['email'] = ['The email address is already registered.'];
+                        $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
+                        $url_link = \URL::to("/");
+                        $url = $url_link . '/';
+                        $email = $userExist->email;
+                        $name = $userExist->name ?? ($userExist->first_name ?? '');
+                        try {
+                            $this->attachment_otp_email($email, $otp, $name, $url, $logo);
+                        } catch (\Exception $e) {}
+                        \Session::put('otp_phone', $userExist->phone);
+                        \Session::put('email', $userExist->email);
+                        \Session::put('first_name', $userExist->first_name);
+                        \Session::put('phone_code', $userExist->phone_code);
+                        return response()->json(['success' => 'true', 'guest_otp' => true]);
+                    }
+                } else {
+                    // For non-guest or non-guest-user, show already exists error as before
+                    $errors = [];
+                    if ($userExist->email === $request->email) {
+                        $errors['email'] = ['The email address is already registered.'];
+                    }
+                    if ($userExist->phone === $request->phone) {
+                        $errors['phone'] = ['The phone number is already registered.'];
+                    }
+                    Alert::warning('Warning', $errors);
+                    return response()->json($errors, 422);
                 }
-
-                if ($userExist->phone === $request->phone) {
-                    $errors['phone'] = ['The phone number is already registered.'];
-                }
-
-                Alert::warning('Warning', $errors);
-                return response()->json($errors, 422);
             }
 
-
-            unset($_SESSION["otp_phone"]);
-            // Session::set('otp_phone', $request->phone);
             \Session::put('otp_phone', $request->phone);
             \Session::put('email', $request->email);
             \Session::put('first_name', $request->first_name);
             \Session::put('phone_code', $request->phone_code);
 
             $otp = mt_rand(1000, 9999);
-
-            // $user->otp_expire_time = date('Y-m-d H:i:s', strtotime(Helper::getOtpExpireTime()));
-            $otp_expire_time = Carbon::now()->addSeconds(@$setting->otp_expiration_second ?: 300);
+            $otp_expire_time = now()->addMinutes(5)->toDateTimeString();
 
             $user = new MainUser;
             $uniqid = uniqid();
@@ -490,60 +528,31 @@ class WebsiteLoginController extends Controller
             $user->age = isset($request->age) ? $request->age : '';
             $user->phone = isset($request->phone) ? $request->phone : '';
             $user->phone_code = isset($request->phone_code) ? $request->phone_code : '';
-            $user->password = isset($request->password) ? Hash::make($request->password) : '';
             $user->otp = $otp;
-
-            $user->otp_expire_time = $otpExpireTime = now()->addMinutes(5)->toDateTimeString();
+            $user->otp_expire_time = $otp_expire_time;
             $user->user_type = 1;
             $user->status = 2;
+            $user->is_guest_user = $isGuest ? 1 : 0;
+            if (!$isGuest) {
+                $user->password = isset($request->password) ? Hash::make($request->password) : '';
+            }
             $user->save();
-
-
-            // $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
-            // $url_link = \URL::to("/");
-            // $url = $url_link . '/';
-            // $email = $user->email;
-            // $otp = $otp;
-            // $name = $user->name;
-            // $phonecode = $request->phone_code;
-
-            // try {
-            //     $ismail = $this->attachment_otp_email($email, $otp, $name, $url, $logo);
-            // } catch (Exception $e) {
-            //     // Log the error message
-            //     error_log($e->getMessage());
-
-            //     // Optionally, display a user-friendly message
-            //     echo "An error occurred while sending the email. Please try again later.";
-            // }
-
 
             $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
             $url_link = \URL::to("/");
             $url = $url_link . '/';
             $email = $user->email;
-            $otp = $otp;
-            $name = $user->name;
+            $name = $user->name ?? ($user->first_name ?? '');
             $phonecode = $request->phone_code;
             $otp_phone = $request->phone;
-
             try {
-
                 $ismail = $this->attachment_otp_email($email, $otp, $name, $url, $logo);
-                // dd($ismail);
-                // $sendsms= \Helper::sendTwilioSMS("+".$phonecode.$otp_phone, 'Dear Customer, Your OTP for login is:'.$otp);
-
-
-
                 $sendsms = \Helper::sendTwilioSMS(
                     "+" . $phonecode . $otp_phone,
                     'Dear Customer, Your OTP for login is ' . $otp . ' and it will be valid for 5 Mins - Liquor Junction Ghana.'
                 );
-            } catch (\Exception $e) {
-                // Handle the exception and log the error if necessary
-
-            }
-            return response()->json(['success' => 'true']);
+            } catch (\Exception $e) {}
+            return response()->json(['success' => 'true', 'guest_otp' => $isGuest]);
         }
         abort(404);
     }
@@ -763,27 +772,27 @@ class WebsiteLoginController extends Controller
         if (!$user) {
             return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_incorrect')), 500);
         } else {
-
             if ($current_time > $user->otp_expire_time) {
                 return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_expired_msg')), 500);
             }
-
             try {
                 $updatepsw = MainUser::where('id', $user->id)->update([
                     'is_otp_verify' => 1,
                     'status' => 1,
                     'is_verify_user' => 1,
                 ]);
-
-                // Print the SQL query
                 \DB::enableQueryLog();
                 \DB::getQueryLog();
                 $ismail = $this->attachment_register_email($user);
                 Alert::success(\Helper::language('success'), __('backend.user_register_successfully'));
-
-                return response()->json(['success' => 'true']);
+                if ($user->is_guest_user == 1) {
+                    Auth::guard('user')->login($user);
+                    return response()->json(['success' => 'true', 'redirect' => route('frontend.home')]);
+                } else {
+                    return response()->json(['success' => 'true', 'redirect' => route('websitelogin')]);
+                }
             } catch (\Exception $e) {
-                dd($e->getMessage()); // Print any exceptions
+                dd($e->getMessage());
             }
         }
     }

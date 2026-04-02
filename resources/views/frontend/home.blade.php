@@ -832,15 +832,22 @@ if(session::get('language')==2){
                     $('.loader').css("visibility", "hidden");
                     $('#cart-url').removeAttr("onclick").attr('href', '{{ route('cart') }}');
                     $(".cart-item-total-count").html(response.cart_count);
+                    updateCartUI();
                     if (response.success == "true") {
-                        Swal.fire({
-                            icon: "success",
-                            title: success_message,
-                            text: added_product_message,
-                            customClass: {
-                                confirmButton: 'swal-custom-confirm'
-                            }
-                        });
+                        if (typeof shakeFloatingCart === 'function') shakeFloatingCart();
+                    // Add shake animation to button
+                    $this.addClass('shake');
+                    $this.one('animationend webkitAnimationEnd oAnimationEnd MSAnimationEnd', function() {
+                        $this.removeClass('shake');
+                    });
+                        // Swal.fire({
+                        //     icon: "success",
+                        //     title: success_message,
+                        //     text: added_product_message,
+                        //     customClass: {
+                        //         confirmButton: 'swal-custom-confirm'
+                        //     }
+                        // });
                     }
                 },
             });

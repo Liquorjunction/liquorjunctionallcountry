@@ -158,22 +158,10 @@
                 $('.loader').css("visibility", "visible");
             },
             success: function(response) {
-                // return false;\
                 $('.loader').css("visibility", "visible");
-                if(document.readyState === 'ready' || document.readyState === 'complete') {
-                    var url = "{{route('websitelogin')}}";
-                    window.location.href = url;
-                } else {
-                document.onreadystatechange = function () {
-                    if (document.readyState == "complete") {
-                        var url = "{{route('websitelogin')}}";
-                         window.location.href = url;
-                    }
+                if (response.redirect) {
+                    window.location.href = response.redirect;
                 }
-                }
-                // $('.loader').css("visibility", "visible");
-                // var url = "{{route('websitelogin')}}";
-                // window.location.href = url;
             },
             error: function(errors) {
                 // alert(errors);

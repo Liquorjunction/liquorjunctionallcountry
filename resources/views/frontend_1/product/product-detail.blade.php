@@ -759,11 +759,18 @@ video::-webkit-media-controls-timeline {
                     // var totalCount = (currentCount + response.cart_count)
                     $(".cart-item-total-count").html(response.cart_count);
                     if (response.success == "true") {
-                        Swal.fire({
-                            icon: "success",
-                            title: success_message,
-                            text: added_product_message,
-                        });
+                        updateCartUI();
+                        // Swal.fire({
+                        //     icon: "success",
+                        //     title: success_message,
+                        //     text: added_product_message,
+                        // });
+                        if (typeof shakeFloatingCart === 'function') shakeFloatingCart();
+                    // Add shake animation to button
+                    $this.addClass('shake');
+                    $this.one('animationend webkitAnimationEnd oAnimationEnd MSAnimationEnd', function() {
+                        $this.removeClass('shake');
+                    });
                     }
                 },
             });

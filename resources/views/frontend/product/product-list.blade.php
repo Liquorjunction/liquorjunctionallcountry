@@ -2,7 +2,6 @@
 @section('title', 'Product List')
 @section('content')
 
-
     <style>
         .bogo {
             /* position: absolute; */
@@ -786,56 +785,58 @@ checkCategorySelection();
 <script>
     // add to cart
     $(document).on('click', '.add-bucket', function(e) {
-            e.preventDefault();
+        e.preventDefault();
 
-            var $this = $(this);
-            $this.hide();
+        var $this = $(this);
+         $this.hide(); // Don't hide, just animate
 
-            var product_id = $this.data('product-id');
-            var variantId = $this.data('variant-id');
-            var bogo_status = $this.data('bogo_status');
-            var offer_status = $this.data('offer_status');
-            var quantity = 1;
-            var action_url = "{{ route('productcartadd') }}";
-            var csrf = "{{ csrf_token() }}";
-            var currentCount = $(".cart-item-total-count").html();
+        var product_id = $this.data('product-id');
+        var variantId = $this.data('variant-id');
+        var bogo_status = $this.data('bogo_status');
+        var offer_status = $this.data('offer_status');
+        var quantity = 1;
+        var action_url = "{{ route('productcartadd') }}";
+        var csrf = "{{ csrf_token() }}";
+        var currentCount = $(".cart-item-total-count").html();
 
-            var added_product_message = "{{\Helper::language('product_added_to_cart_successfully')}}";
-            var success_message = "{{\Helper::language('success')}}";
+        var added_product_message = "{{\Helper::language('product_added_to_cart_successfully')}}";
+        var success_message = "{{\Helper::language('success')}}";
 
-            $.ajax({
-                url: action_url,
-                data: {
-                    'product_id': product_id,
-                    'quantity': quantity,
-                    'variantId': variantId,
-                    'bogo_status':bogo_status,
-                    'offer_status':offer_status
-                },
-                headers: {
-                    'X-CSRF-TOKEN': csrf
-                },
-                type: "POST",
-                beforeSend: function() {
-                     $(".loader").fadeIn().css("visibility", "visible");
-                },
-                success: function(response) {
-                    $('.loader').css("visibility", "hidden");
-                    $('#cart-url').removeAttr("onclick").attr('href', '{{ route('cart') }}');
-                    $(".cart-item-total-count").html(response.cart_count);
-                    if (response.success == "true") {
-                        Swal.fire({
-                            icon: "success",
-                            title: success_message,
-                            text: added_product_message,
-                            customClass: {
-                                confirmButton: 'swal-custom-confirm'
-                            }
-
-                        });
-                    }
-                },
-            });
+        $.ajax({
+            url: action_url,
+            data: {
+                'product_id': product_id,
+                'quantity': quantity,
+                'variantId': variantId,
+                'bogo_status':bogo_status,
+                'offer_status':offer_status
+            },
+            headers: {
+                'X-CSRF-TOKEN': csrf
+            },
+            type: "POST",
+            beforeSend: function() {
+                $(".loader").fadeIn().css("visibility", "visible");
+            },
+            success: function(response) {
+                $('.loader').css("visibility", "hidden");
+                $('#cart-url').removeAttr("onclick").attr('href', '{{ route('cart') }}');
+                $(".cart-item-total-count").html(response.cart_count);
+                // Also update floating cart count if present
+                var floatingCartCount = document.querySelector('#floating-cart .cart-item-total-count');
+                if (floatingCartCount) floatingCartCount.textContent = response.cart_count;
+                if (response.success == "true") {
+                    updateCartUI();
+                    // Add shake animation to floating cart
+                    if (typeof shakeFloatingCart === 'function') shakeFloatingCart();
+                    // Add shake animation to button
+                    $this.addClass('shake');
+                    $this.one('animationend webkitAnimationEnd oAnimationEnd MSAnimationEnd', function() {
+                        $this.removeClass('shake');
+                    });
+                }
+            },
+        });
         });
 </script>
 

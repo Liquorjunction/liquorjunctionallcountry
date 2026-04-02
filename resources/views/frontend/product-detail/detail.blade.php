@@ -314,33 +314,48 @@
         var csrf = "{{ csrf_token() }}";
 
         $.ajax({
-                            url: action_url,
-                            data: {'user_id':user_id,'product_id':product_id,'product_price':product_price,'quantity':quantity,'discount_price':discount_price},
-                            headers: {
-                                'X-CSRF-TOKEN': csrf
-                            },
-                            type: "POST",
-                    
-                             beforeSend: function(){
-                                    $(".loader").fadeIn();
-                                    $('.loader').css("visibility", "visible");
-                                },
-                            success: function (response) 
-                            {
-                                // return false;
-                                // console.log(response.code)
-                                // return false;
-                                if (response.code != 0) {
-                                    $('.loader').css("visibility", "visible");
-                                    var url = "{{route('cart')}}";
-                                    window.location.href = url;
-                                }else{
-                                    location.reload();
-                                }
-                                
-                                // location.reload();
-                            },
+            url: action_url,
+            data: {'user_id':user_id,'product_id':product_id,'product_price':product_price,'quantity':quantity,'discount_price':discount_price},
+            headers: {
+                'X-CSRF-TOKEN': csrf
+            },
+            type: "POST",
+            beforeSend: function(){
+                $(".loader").fadeIn();
+                $('.loader').css("visibility", "visible");
+            },
+            success: function (response) 
+            {
+                // Only shake and show success if add to cart is successful
+                if (response.code == 1 || response.success) {
+                    var addToCartBtn = document.querySelector('.buy-btn a.common-btn');
+                    if (addToCartBtn) {
+                        addToCartBtn.classList.remove('shake');
+                        void addToCartBtn.offsetWidth;
+                        addToCartBtn.classList.add('shake');
+                    }
+                    // Show success message using SweetAlert2
+                    if (window.Swal) {
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Added to Cart!',
+                            text: 'The item was successfully added to your cart.',
+                            timer: 1500,
+                            showConfirmButton: false
                         });
+                    } else {
+                        alert('Added to Cart!');
+                    }
+                    // Optionally update cart UI here if needed
+                } else if (response.code != 0) {
+                    $('.loader').css("visibility", "visible");
+                    var url = "{{route('cart')}}";
+                    window.location.href = url;
+                } else {
+                    location.reload();
+                }
+            },
+        });
 
     }
 

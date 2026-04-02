@@ -52,6 +52,134 @@ class Helper
         return $WebmasterSetting->$var;
     }
 
+    static function getUserCartItems()
+{
+    $user = Auth::guard('user')->user();
+    $cartItems = [];
+
+    // =========================
+    // 🟢 CASE 1: LOGGED-IN USER
+    // =========================
+    if ($user) {
+
+        $carts = \DB::table('cart')
+            ->where('user_id', $user->id)
+            ->where('status', 1)
+            ->get();
+
+        foreach ($carts as $cart) {
+
+            // Get product
+            $product = \DB::table('product')
+                ->where('id', $cart->product_id)
+                ->first();
+
+            // Get image
+            $image = asset('assets/frontend/images/no-image.png');
+            if ($product) {
+                $productImage = \DB::table('product_image')
+                    ->where('product_id', $product->id)
+                    ->where('status', 1)
+                    ->first();
+
+                if ($productImage) {
+                    $image = asset('uploads/product/' . $productImage->image);
+                }
+            }
+
+            // ✅ Price logic (same as add-to-cart)
+            $price = $cart->product_price;
+
+            if ($cart->is_offer && !$cart->is_bogo) {
+                $price = $cart->offer_price ?? $price;
+            }
+
+            $cartItems[] = [
+                'id' => $cart->id,
+                'name' => $product->product_name ?? 'Product',
+                'variant_id' => $cart->product_variant_id,
+                'qty' => $cart->quantity,
+                'price' => $price,
+                'total' => $cart->total_price,
+
+                'is_bogo' => $cart->is_bogo,
+                'is_offer' => $cart->is_offer,
+                'offer_type' => $cart->offer_type,
+                'discount_amount' => $cart->discount_amount,
+
+                'image' => $image,
+            ];
+        }
+
+        return $cartItems;
+    }
+
+    // =========================
+    // 🟡 CASE 2: GUEST USER (SESSION)
+    // =========================
+    $sessionCart = session()->get('cart_info', []);
+
+    if (!empty($sessionCart)) {
+
+        foreach ($sessionCart as $product_id => $variants) {
+
+            // Get product
+            $product = \DB::table('product')
+                ->where('id', $product_id)
+                ->first();
+
+            foreach ($variants as $variant_id => $item) {
+
+                // Get variant
+                $variant = \DB::table('product_variants')
+                    ->where('id', $variant_id)
+                    ->first();
+
+                // Get image
+                $image = asset('assets/frontend/images/no-image.png');
+                if ($product) {
+                    $productImage = \DB::table('product_image')
+                        ->where('product_id', $product->id)
+                        ->where('status', 1)
+                        ->first();
+
+                    if ($productImage) {
+                        $image = asset('uploads/product/' . $productImage->image);
+                    }
+                }
+
+                // ✅ Price logic (match add-to-cart)
+                $price = $variant->variant_price ?? 0;
+
+                if (!empty($item['is_offer']) && empty($item['is_bogo'])) {
+                    $price = $variant->variant_discounted_price ?? $price;
+                }
+
+                $qty = $item['quantity'] ?? 1;
+                $total = $price * $qty;
+
+                $cartItems[] = [
+                    'id' => $product_id . '_' . $variant_id,
+                    'name' => $product->product_name ?? 'Product',
+                    'variant_id' => $variant_id,
+                    'qty' => $qty,
+                    'price' => $price,
+                    'total' => $total,
+
+                    'is_bogo' => $item['is_bogo'] ?? 0,
+                    'is_offer' => $item['is_offer'] ?? 0,
+                    'offer_type' => $item['offer_type'] ?? null,
+                    'discount_amount' => $item['discount_amount'] ?? null,
+
+                    'image' => $image,
+                ];
+            }
+        }
+    }
+
+    return $cartItems;
+}
+
     static function GeneralSiteSettings($var)
     {
         $Setting = Setting::find(1);

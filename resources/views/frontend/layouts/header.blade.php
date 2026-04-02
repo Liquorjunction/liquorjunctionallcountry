@@ -622,9 +622,9 @@ if ($user_id) {
 
                             @endif
 
-                            @if(auth()->guard('user')->check() && !auth()->guard('user')->user()->is_guest_user)
                             <li>
                                 @if (!empty($user_id))
+                                    @if(auth()->guard('user')->check() && !auth()->guard('user')->user()->is_guest_user)
                                     <a href="{{ route('my-account') }}"
                                         title="{{ @Helper::language('my_account_label') }}">
                                         <svg width="20" height="22" viewBox="0 0 20 22" fill="none"
@@ -634,6 +634,7 @@ if ($user_id) {
                                                 fill="#242424" />
                                         </svg>
                                     </a>
+                                    @endif
                                 @else
                                     <a href="{{ route('websitelogin') }}"
                                         title="{{ @Helper::language('login_label') }}">
@@ -647,7 +648,6 @@ if ($user_id) {
                                 @endif
 
                             </li>
-                            @endif
                             @if (!empty($user_id))
                             <li>
                                  <a href="javascript:void(0)" class="sidebar-link" data-bs-toggle="modal" data-bs-target="#logoutModal">{{@Helper::language('logout_label_web')}}</a>
@@ -655,8 +655,9 @@ if ($user_id) {
                             @endif
                             <li class="header-cart">
                                 {{-- <a id="cart-url" @if (Auth::guard('user')->user() == '' && Session::get('cart_info') == '') onclick="isCartEmpty();" @else href="{{route('cart')}}" @endif> --}}
-                                <a id="cart-url" href="{{ route('cart') }}"
-                                    title="{{ @Helper::language('my_cart') }}">
+                                <div class="cart-dropdown-wrapper" style="position: relative; display: inline-block;">
+                                    <a id="cart-url" href="{{ route('cart') }}"
+                                        title="{{ @Helper::language('my_cart') }}">
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
                                         xmlns="http://www.w3.org/2000/svg">
                                         <path
@@ -684,19 +685,139 @@ if ($user_id) {
                                         </g>
                                     </svg> --}}
                                 </a>
-                                <span class="cart-item-total-count">
+                                    <span class="cart-item-total-count">
                                     @php
                                         if (Auth::guard('user')->user() == '' && Session::get('cart_info')) {
                                             echo count(Session::get('cart_info'));
-                                        } elseif (Auth::guard('user')->user() != '') {
-                                            echo Helper::getUserCartCount();
                                         } else {
                                             echo '0';
                                         }
                                     @endphp
-                                    {{-- @if (!empty(Helper::getUserCartCount())){{Helper::getUserCartCount() }} @else 0 @endif --}}
-                                </span>
+                                    {{-- @if ({{ elseif (Auth::guard('user')->user() != '') 
+                                            echo Helper::getUserCartCount();
+                                         }}())){{Helper::getUserCartCount() }} @else 0 @endif --}}
+                                    </span>
+                                    <!-- Small Cart Dropdown -->
+                                    <div id="small-cart-dropdown" class="small-cart-dropdown" style="display:none; position:absolute; right:0; top:40px; width:340px; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.15); border-radius:8px; z-index:9999;">
+                                        <div style="max-height:300px; overflow-y:auto; padding:15px 15px 0 15px;">
+                                            @php
+                                                $cartItems = [];
+                                                if (Auth::guard('user')->user() == '' && Session::get('cart_info')) {
+                                                    $cartItems = Session::get('cart_info');
+                                                } elseif (Auth::guard('user')->user() != '') {
+                                                    $cartItems = Helper::getUserCartItems(); // You may need to implement this helper if not present
+                                                }
+                                            @endphp
+                                            @if(!empty($cartItems) && count($cartItems) > 0)
+                                                @foreach($cartItems as $item)
+                                                    <div class="cart-item d-flex align-items-center mb-2" style="border-bottom:1px solid #eee; padding-bottom:8px;">
+                                                        <div style="width:50px; height:50px; flex-shrink:0;">
+                                                            <img src="{{ $item['image'] ?? asset('assets/frontend/images/no-image.png') }}" alt="{{ $item['name'] ?? '' }}" style="width:100%; height:100%; object-fit:cover; border-radius:4px;">
+                                                        </div>
+                                                        <div class="ms-2" style="flex:1;">
+                                                            <div style="font-weight:600; font-size:15px;">{{ $item['name'] ?? '' }}</div>
+                                                            <div style="font-size:13px; color:#888;">Qty: {{ $item['qty'] ?? 1 }}</div>
+                                                            <div style="font-size:14px; color:#242424;">{{ @$settings->currency_symbol }}{{ $item['price'] ?? '0.00' }}</div>
+                                                        </div>
+                                                    </div>
+                                                @endforeach
+                                            @else
+                                                <div class="text-center py-4" style="color:#888;">Your cart is empty.</div>
+                                            @endif
+                                        </div>
+                                        <div style="padding:15px; border-top:1px solid #eee; background:#fafafa;">
+                                            <a href="{{ route('cart') }}" class="solid-button w-100">Checkout</a>
+                                        </div>
+                                    </div>
+                                </div>
                             </li>
+                            <style>
+                            .small-cart-dropdown::-webkit-scrollbar {
+                                width: 6px;
+                                background: #f1f1f1;
+                            }
+                            .small-cart-dropdown::-webkit-scrollbar-thumb {
+                                background: #ccc;
+                                border-radius: 3px;
+                            }
+                            </style>
+                            <script>
+                            function renderSmallCartDropdown(items) {
+                                var html = '';
+                                if (items.length > 0) {
+                                    items.forEach(function(item) {
+                                        html += `<div class="cart-item d-flex align-items-center mb-2" style="border-bottom:1px solid #eee; padding-bottom:8px; position:relative;">
+                                            <div style="width:50px; height:50px; flex-shrink:0;">
+                                                <img src="${item.image}" alt="${item.name}" style="width:100%; height:100%; object-fit:cover; border-radius:4px;">
+                                            </div>
+                                            <div class="ms-2" style="flex:1;">
+                                                <div style="font-weight:600; font-size:15px;">${item.name}</div>
+                                                <div style="font-size:13px; color:#888;">Qty: ${item.qty}</div>
+                                                <div style="font-size:14px; color:#242424;">${item.price}</div>
+                                            </div>
+                                            <button class="delete-cart-item-btn" data-id="${item.id}" title="Remove">Delete</button>
+                                        </div>`;
+                                    });
+                                                            // Handle delete icon click
+                                                            document.addEventListener('click', function(e) {
+                                                                if (e.target.closest('.delete-cart-item-btn')) {
+                                                                    var btn = e.target.closest('.delete-cart-item-btn');
+                                                                    var id = btn.getAttribute('data-id');
+                                                                    fetch('/cart/item/' + id, {
+                                                                        method: 'DELETE',
+                                                                        headers: {
+                                                                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]'),
+                                                                            'Accept': 'application/json'
+                                                                        }
+                                                                    })
+                                                                    .then(res => res.json())
+                                                                    .then(data => {
+                                                                        if (data.success) {
+                                                                            updateCartUI();
+                                                                        }
+                                                                    });
+                                                                }
+                                                            });
+                                } else {
+                                    html = '<div class="text-center py-4" style="color:#888;">Your cart is empty.</div>';
+                                }
+                                document.querySelector('#small-cart-dropdown > div').innerHTML = html;
+                            }
+
+                            function updateCartUI() {
+                                console.log('ssss');
+                                fetch('/cart/data')
+                                    .then(res => res.json())
+                                    .then(data => {
+                                        document.querySelector('.cart-item-total-count').textContent = data.count;
+                                        renderSmallCartDropdown(data.items);
+                                    });
+                            }
+
+                            document.addEventListener('DOMContentLoaded', function() {
+                                var cartUrl = document.getElementById('cart-url');
+                                var dropdown = document.getElementById('small-cart-dropdown');
+                                if(cartUrl && dropdown) {
+                                    cartUrl.addEventListener('mouseenter', function() {
+                                        dropdown.style.display = 'block';
+                                    });
+                                    cartUrl.addEventListener('mouseleave', function() {
+                                        setTimeout(function() {
+                                            if(!dropdown.matches(':hover')) dropdown.style.display = 'none';
+                                        }, 200);
+                                    });
+                                    dropdown.addEventListener('mouseenter', function() {
+                                        dropdown.style.display = 'block';
+                                    });
+                                    dropdown.addEventListener('mouseleave', function() {
+                                        dropdown.style.display = 'none';
+                                    });
+                                }
+                                // Optionally, update cart UI on page load
+                                updateCartUI();
+                            });
+                            // Call updateCartUI() after AJAX add-to-cart success
+                            </script>
                             <li class="site_language">
                                 <select class="form-select" aria-label="site_language" name="LanguageChange"
                                     id="langchange">

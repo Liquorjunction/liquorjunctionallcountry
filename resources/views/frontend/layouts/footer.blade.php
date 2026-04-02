@@ -128,6 +128,8 @@
     <a href="#" id="c-go-top" class="c-go-top">
         <span></span>
     </a>
+    <!-- Floating Cart Icon -->
+    @include('frontend.partials.floating-cart')
     <!-- End Footer -->
 
 
