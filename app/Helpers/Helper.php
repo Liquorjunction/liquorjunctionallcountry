@@ -52,62 +52,65 @@ class Helper
         return $WebmasterSetting->$var;
     }
 
-    static function getUserCartItems()
+static function getUserCartItems()
 {
     $user = Auth::guard('user')->user();
     $cartItems = [];
 
     // =========================
-    // 🟢 CASE 1: LOGGED-IN USER
+    // 🟢 LOGGED-IN USER
     // =========================
     if ($user) {
 
         $carts = \DB::table('cart')
-            ->where('user_id', $user->id)
-            ->where('status', 1)
+            ->leftJoin('product', 'product.id', '=', 'cart.product_id')
+            ->leftJoin('product_image', function ($join) {
+                $join->on('product_image.product_id', '=', 'product.id')
+                     ->where('product_image.status', 1);
+            })
+            ->select(
+                'cart.*',
+                'product.product_name',
+                'product_image.image'
+            )
+            ->where('cart.user_id', $user->id)
+            ->where('cart.status', 1)
             ->get();
 
         foreach ($carts as $cart) {
 
-            // Get product
-            $product = \DB::table('product')
-                ->where('id', $cart->product_id)
-                ->first();
-
-            // Get image
-            $image = asset('assets/frontend/images/no-image.png');
-            if ($product) {
-                $productImage = \DB::table('product_image')
-                    ->where('product_id', $product->id)
-                    ->where('status', 1)
-                    ->first();
-
-                if ($productImage) {
-                    $image = asset('uploads/product/' . $productImage->image);
-                }
-            }
-
-            // ✅ Price logic (same as add-to-cart)
+            // ✅ FINAL PRICE (single source of truth)
             $price = $cart->product_price;
 
             if ($cart->is_offer && !$cart->is_bogo) {
                 $price = $cart->offer_price ?? $price;
+
+                // Apply discount if exists
+                if (!empty($cart->discount_amount)) {
+                    if ($cart->offer_type == 'percentage') {
+                        $price -= ($price * $cart->discount_amount / 100);
+                    } else {
+                        $price -= $cart->discount_amount;
+                    }
+                }
             }
 
             $cartItems[] = [
                 'id' => $cart->id,
-                'name' => $product->product_name ?? 'Product',
+                'name' => $cart->product_name ?? 'Product',
                 'variant_id' => $cart->product_variant_id,
                 'qty' => $cart->quantity,
-                'price' => $price,
-                'total' => $cart->total_price,
+                'price' => round($price, 2),
+                'total' => round($price * $cart->quantity, 2),
 
                 'is_bogo' => $cart->is_bogo,
                 'is_offer' => $cart->is_offer,
                 'offer_type' => $cart->offer_type,
                 'discount_amount' => $cart->discount_amount,
 
-                'image' => $image,
+                'image' => $cart->image 
+                    ? asset('uploads/product/' . $cart->image)
+                    : asset('assets/frontend/images/no-image.png'),
             ];
         }
 
@@ -115,7 +118,7 @@ class Helper
     }
 
     // =========================
-    // 🟡 CASE 2: GUEST USER (SESSION)
+    // 🟡 SESSION USER
     // =========================
     $sessionCart = session()->get('cart_info', []);
 
@@ -123,55 +126,45 @@ class Helper
 
         foreach ($sessionCart as $product_id => $variants) {
 
-            // Get product
-            $product = \DB::table('product')
-                ->where('id', $product_id)
-                ->first();
+            $product = \DB::table('product')->where('id', $product_id)->first();
 
             foreach ($variants as $variant_id => $item) {
 
-                // Get variant
                 $variant = \DB::table('product_variants')
                     ->where('id', $variant_id)
                     ->first();
 
-                // Get image
-                $image = asset('assets/frontend/images/no-image.png');
-                if ($product) {
-                    $productImage = \DB::table('product_image')
-                        ->where('product_id', $product->id)
-                        ->where('status', 1)
-                        ->first();
-
-                    if ($productImage) {
-                        $image = asset('uploads/product/' . $productImage->image);
-                    }
-                }
-
-                // ✅ Price logic (match add-to-cart)
                 $price = $variant->variant_price ?? 0;
 
                 if (!empty($item['is_offer']) && empty($item['is_bogo'])) {
                     $price = $variant->variant_discounted_price ?? $price;
+
+                    // Apply discount
+                    if (!empty($item['discount_amount'])) {
+                        if ($item['offer_type'] == 'percentage') {
+                            $price -= ($price * $item['discount_amount'] / 100);
+                        } else {
+                            $price -= $item['discount_amount'];
+                        }
+                    }
                 }
 
                 $qty = $item['quantity'] ?? 1;
-                $total = $price * $qty;
 
                 $cartItems[] = [
                     'id' => $product_id . '_' . $variant_id,
                     'name' => $product->product_name ?? 'Product',
                     'variant_id' => $variant_id,
                     'qty' => $qty,
-                    'price' => $price,
-                    'total' => $total,
+                    'price' => round($price, 2),
+                    'total' => round($price * $qty, 2),
 
                     'is_bogo' => $item['is_bogo'] ?? 0,
                     'is_offer' => $item['is_offer'] ?? 0,
                     'offer_type' => $item['offer_type'] ?? null,
                     'discount_amount' => $item['discount_amount'] ?? null,
 
-                    'image' => $image,
+                    'image' => asset('assets/frontend/images/no-image.png'),
                 ];
             }
         }

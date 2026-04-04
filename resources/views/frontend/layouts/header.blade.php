@@ -698,7 +698,7 @@ if ($user_id) {
                                          }}())){{Helper::getUserCartCount() }} @else 0 @endif --}}
                                     </span>
                                     <!-- Small Cart Dropdown -->
-                                    <div id="small-cart-dropdown" class="small-cart-dropdown" style="display:none; position:absolute; right:0; top:40px; width:340px; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.15); border-radius:8px; z-index:9999;">
+                                    {{-- <div id="small-cart-dropdown" class="small-cart-dropdown" style="display:none; position:absolute; right:0; top:40px; width:340px; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.15); border-radius:8px; z-index:9999;">
                                         <div style="max-height:300px; overflow-y:auto; padding:15px 15px 0 15px;">
                                             @php
                                                 $cartItems = [];
@@ -728,7 +728,7 @@ if ($user_id) {
                                         <div style="padding:15px; border-top:1px solid #eee; background:#fafafa;">
                                             <a href="{{ route('cart') }}" class="solid-button w-100">Checkout</a>
                                         </div>
-                                    </div>
+                                    </div> --}}
                                 </div>
                             </li>
                             <style>
@@ -742,7 +742,7 @@ if ($user_id) {
                             }
                             </style>
                             <script>
-                            function renderSmallCartDropdown(items) {
+                             function renderSmallCartDropdown(items) {
                                 var html = '';
                                 if (items.length > 0) {
                                     items.forEach(function(item) {

@@ -20,17 +20,56 @@ class CartApiController extends Controller
     }
 
         // Delete a cart item by ID (for AJAX)
-    public function deleteCartItem($id)
-    {
-        $user = auth()->guard('user')->user();
-        if (!$user) {
-            return response()->json(['success' => false, 'message' => 'Unauthorized'], 401);
-        }
-        $cart = \App\Models\Cart::where('id', $id)->where('user_id', $user->id)->first();
+public function deleteCartItem($id)
+{
+    $user = auth()->guard('user')->user();
+
+    // =========================
+    // 🟢 LOGGED-IN USER
+    // =========================
+    if ($user) {
+        $cart = \App\Models\Cart::where('id', $id)
+            ->where('user_id', $user->id)
+            ->first();
+
         if ($cart) {
             $cart->delete();
             return response()->json(['success' => true]);
         }
-        return response()->json(['success' => false, 'message' => 'Item not found'], 404);
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Item not found'
+        ], 404);
     }
+
+    // =========================
+    // 🟡 GUEST USER (SESSION)
+    // =========================
+    $sessionCart = session()->get('cart_info', []);
+
+    // ID format: productId_variantId
+    if (strpos($id, '_') !== false) {
+        list($product_id, $variant_id) = explode('_', $id);
+
+        if (isset($sessionCart[$product_id][$variant_id])) {
+
+            unset($sessionCart[$product_id][$variant_id]);
+
+            // Remove product if no variants left
+            if (empty($sessionCart[$product_id])) {
+                unset($sessionCart[$product_id]);
+            }
+
+            session()->put('cart_info', $sessionCart);
+
+            return response()->json(['success' => true]);
+        }
+    }
+
+    return response()->json([
+        'success' => false,
+        'message' => 'Item not found'
+    ], 404);
+}
 }

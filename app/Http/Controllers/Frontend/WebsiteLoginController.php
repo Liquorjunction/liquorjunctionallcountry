@@ -468,13 +468,21 @@ class WebsiteLoginController extends Controller
                 $query->where('email', $request->email)
                     ->orWhere('phone', $request->phone);
             })->first();
-
             if ($userExist) {
                 if ($isGuest && $userExist->is_guest_user) {
+                    $sessionCart = session()->get('cart_info', []);
                     if ($userExist->is_otp_verify == 1) {
                         // Already verified guest user, log in and redirect
                         Auth::guard('user')->login($userExist);
-                        return response()->json(['success' => 'true', 'redirect' => route('frontend.home')]);
+                        if (!empty($sessionCart)) {
+                            return response()->json([
+                                'success' => 'true',
+                                'guest_otp' => true,
+                                'redirect' => route('checkout')
+                            ]);
+                        }else{
+                            return response()->json(['success' => 'true', 'redirect' => route('frontend.home')]);
+                        }
                     } else {
                         // If guest user exists, just log in and send OTP again
                         $otp = mt_rand(1000, 9999);
@@ -786,8 +794,26 @@ class WebsiteLoginController extends Controller
                 $ismail = $this->attachment_register_email($user);
                 Alert::success(\Helper::language('success'), __('backend.user_register_successfully'));
                 if ($user->is_guest_user == 1) {
+
                     Auth::guard('user')->login($user);
-                    return response()->json(['success' => 'true', 'redirect' => route('frontend.home')]);
+
+                    // 🔥 IMPORTANT: Merge session cart into DB (optional but recommended)
+                    $this->mergeGuestCartToUser($user->id);
+
+                    // Get updated cart
+                    $cartItems = \Helper::getUserCartItems();
+
+                    if (count($cartItems) > 0) {
+                        return response()->json([
+                            'success' => 'true',
+                            'redirect' => route('checkout') // 👈 your checkout route
+                        ]);
+                    }
+
+                    return response()->json([
+                        'success' => 'true',
+                        'redirect' => route('frontend.home')
+                    ]);
                 } else {
                     return response()->json(['success' => 'true', 'redirect' => route('websitelogin')]);
                 }
@@ -796,6 +822,56 @@ class WebsiteLoginController extends Controller
             }
         }
     }
+
+    private function mergeGuestCartToUser($userId)
+{
+    $sessionCart = session()->get('cart_info', []);
+
+    if (empty($sessionCart)) return;
+
+    foreach ($sessionCart as $product_id => $variants) {
+
+        foreach ($variants as $variant_id => $item) {
+
+            $exists = \DB::table('cart')
+                ->where('user_id', $userId)
+                ->where('product_id', $product_id)
+                ->where('product_variant_id', $variant_id)
+                ->where('status', 1)
+                ->first();
+
+            if ($exists) {
+                // Update quantity
+                \DB::table('cart')
+                    ->where('id', $exists->id)
+                    ->update([
+                        'quantity' => $exists->quantity + ($item['quantity'] ?? 1)
+                    ]);
+            } else {
+                \DB::table('cart')->insert([
+                    'uniqid' => uniqid(),
+                    'user_id' => $userId,
+                    'product_id' => $product_id,
+                    'product_variant_id' => $variant_id,
+                    'quantity' => $item['quantity'] ?? 1,
+                    'product_price' => 0, // optional (you can recalc)
+                    'offer_price' => 0,
+                    'total_price' => 0,
+                    'is_bogo' => $item['is_bogo'] ?? 0,
+                    'is_offer' => $item['is_offer'] ?? 0,
+                    'offer_type' => $item['offer_type'] ?? null,
+                    'discount_amount' => $item['discount_amount'] ?? null,
+                    'status' => 1,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
+    }
+
+    // 🧹 Clear session cart after merge
+    session()->forget('cart_info');
+}
 
     public function websiteResendOtpForm(Request $request)
     {

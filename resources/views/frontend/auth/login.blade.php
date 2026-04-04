@@ -60,7 +60,7 @@
                             <div class="col-12">
                                 <button type="submit"
                                     class="solid-button w-100">{{ @Helper::language('login_label') }}</button>
-                                <a href="{{ route('guest.login') }}" class="btn btn-outline-primary w-100 mt-2">{{ @Helper::language('login_as_guest') }}</a>
+                                <a style="margin-top: 15px;" href="{{ route('guest.login') }}" class="solid-button w-100">{{ @Helper::language('login_as_guest') }}</a>
                                 <div class="registration-social">
                                     <p class="text-sm grey-text">{{ @Helper::language('login_or_continue_with') }}</p>
                                     <ul>
