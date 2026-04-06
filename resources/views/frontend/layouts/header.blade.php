@@ -648,9 +648,21 @@ if ($user_id) {
                                 @endif
 
                             </li>
-                            @if (!empty($user_id))
+                            @if (!empty($user_id) && auth()->guard('user')->user()->is_guest_user)
                             <li>
-                                 <a href="javascript:void(0)" class="sidebar-link" data-bs-toggle="modal" data-bs-target="#logoutModal">{{@Helper::language('logout_label_web')}}</a>
+                                <a href="javascript:void(0)" 
+                                class="sidebar-link" 
+                                data-bs-toggle="modal" 
+                                data-bs-target="#logoutModal"
+                                title="Logout">
+
+                                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                                        <path d="M16 17L21 12L16 7" stroke="#242424" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <path d="M21 12H9" stroke="#242424" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <path d="M13 21H6C4.895 21 4 20.105 4 19V5C4 3.895 4.895 3 6 3H13" stroke="#242424" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+
+                                </a>
                             </li>
                             @endif
                             <li class="header-cart">
@@ -698,7 +710,7 @@ if ($user_id) {
                                          }}())){{Helper::getUserCartCount() }} @else 0 @endif --}}
                                     </span>
                                     <!-- Small Cart Dropdown -->
-                                    {{-- <div id="small-cart-dropdown" class="small-cart-dropdown" style="display:none; position:absolute; right:0; top:40px; width:340px; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.15); border-radius:8px; z-index:9999;">
+                                    <div id="small-cart-dropdown" class="small-cart-dropdown" style="display:none; position:absolute; right:0; top:40px; width:340px; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.15); border-radius:8px; z-index:9999;">
                                         <div style="max-height:300px; overflow-y:auto; padding:15px 15px 0 15px;">
                                             @php
                                                 $cartItems = [];
@@ -728,7 +740,7 @@ if ($user_id) {
                                         <div style="padding:15px; border-top:1px solid #eee; background:#fafafa;">
                                             <a href="{{ route('cart') }}" class="solid-button w-100">Checkout</a>
                                         </div>
-                                    </div> --}}
+                                    </div>
                                 </div>
                             </li>
                             <style>
@@ -753,9 +765,20 @@ if ($user_id) {
                                             <div class="ms-2" style="flex:1;">
                                                 <div style="font-weight:600; font-size:15px;">${item.name}</div>
                                                 <div style="font-size:13px; color:#888;">Qty: ${item.qty}</div>
-                                                <div style="font-size:14px; color:#242424;">${item.price}</div>
+                                                <div style="font-size:14px; color:#242424;">${item.price} {{ Helper::Settings('currency_symbol') }} </div>
                                             </div>
-                                            <button class="delete-cart-item-btn" data-id="${item.id}" title="Remove">Delete</button>
+                                            <button class="delete-cart-item-btn" data-id="${item.id}" title="Remove"
+        style="background:none; border:none; cursor:pointer; padding:5px;">
+
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M3 6H21" stroke="#ff4d4f" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M8 6V4H16V6" stroke="#ff4d4f" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M19 6L18 20H6L5 6" stroke="#ff4d4f" stroke-width="1.5"/>
+            <path d="M10 11V17" stroke="#ff4d4f" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M14 11V17" stroke="#ff4d4f" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+
+    </button>
                                         </div>`;
                                     });
                                                             // Handle delete icon click
@@ -785,11 +808,11 @@ if ($user_id) {
                             }
 
                             function updateCartUI() {
-                                console.log('ssss');
                                 fetch('/cart/data')
                                     .then(res => res.json())
                                     .then(data => {
                                         document.querySelector('.cart-item-total-count').textContent = data.count;
+                                        document.querySelector('.cart-item-total-count-floating').textContent = data.count;
                                         renderSmallCartDropdown(data.items);
                                     });
                             }

@@ -12,7 +12,7 @@
         <div class="container">
             <div id="Register" class="register">
                 <div class="registration-content">
-                    <h1 class="text-center mb-0">Login as Guest User</h1>
+                    <h1 class="text-center mb-0">Continue as Guest User</h1>
                     <div class="registration-card">
                         <form class="row registration-form" id="guest_login_form" action="" novalidate>
                             @csrf
@@ -47,7 +47,7 @@
                                 </div>
                             </div>
                             <div class="col-12">
-                                <button type="submit" class="solid-button w-100" id="submitGuest">Login as Guest</button>
+                                <button type="submit" class="solid-button w-100" id="submitGuest">{{ 'Continue as Guest' }}</button>
                                 <span id="guest-error" class='red-text'></span>
                             </div>
                             <div class="registration-social">

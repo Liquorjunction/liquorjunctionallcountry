@@ -122,53 +122,64 @@ static function getUserCartItems()
     // =========================
     $sessionCart = session()->get('cart_info', []);
 
-    if (!empty($sessionCart)) {
 
-        foreach ($sessionCart as $product_id => $variants) {
+if (!empty($sessionCart)) {
 
-            $product = \DB::table('product')->where('id', $product_id)->first();
+    foreach ($sessionCart as $product_id => $variants) {
 
-            foreach ($variants as $variant_id => $item) {
+        // 🔥 Fetch product + image together
+        $product = \DB::table('product')
+            ->leftJoin('product_image', function ($join) {
+                $join->on('product_image.product_id', '=', 'product.id')
+                     ->where('product_image.status', 1);
+            })
+            ->select('product.product_name', 'product_image.image')
+            ->where('product.id', $product_id)
+            ->first();
 
-                $variant = \DB::table('product_variants')
-                    ->where('id', $variant_id)
-                    ->first();
+        foreach ($variants as $variant_id => $item) {
 
-                $price = $variant->variant_price ?? 0;
+            $variant = \DB::table('product_variants')
+                ->where('id', $variant_id)
+                ->first();
 
-                if (!empty($item['is_offer']) && empty($item['is_bogo'])) {
-                    $price = $variant->variant_discounted_price ?? $price;
+            $price = $variant->variant_price ?? 0;
 
-                    // Apply discount
-                    if (!empty($item['discount_amount'])) {
-                        if ($item['offer_type'] == 'percentage') {
-                            $price -= ($price * $item['discount_amount'] / 100);
-                        } else {
-                            $price -= $item['discount_amount'];
-                        }
+            if (!empty($item['is_offer']) && empty($item['is_bogo'])) {
+                $price = $variant->variant_discounted_price ?? $price;
+
+                if (!empty($item['discount_amount'])) {
+                    if ($item['offer_type'] == 'percentage') {
+                        $price -= ($price * $item['discount_amount'] / 100);
+                    } else {
+                        $price -= $item['discount_amount'];
                     }
                 }
-
-                $qty = $item['quantity'] ?? 1;
-
-                $cartItems[] = [
-                    'id' => $product_id . '_' . $variant_id,
-                    'name' => $product->product_name ?? 'Product',
-                    'variant_id' => $variant_id,
-                    'qty' => $qty,
-                    'price' => round($price, 2),
-                    'total' => round($price * $qty, 2),
-
-                    'is_bogo' => $item['is_bogo'] ?? 0,
-                    'is_offer' => $item['is_offer'] ?? 0,
-                    'offer_type' => $item['offer_type'] ?? null,
-                    'discount_amount' => $item['discount_amount'] ?? null,
-
-                    'image' => asset('assets/frontend/images/no-image.png'),
-                ];
             }
+
+            $qty = $item['quantity'] ?? 1;
+
+            $cartItems[] = [
+                'id' => $product_id . '_' . $variant_id,
+                'name' => $product->product_name ?? 'Product',
+                'variant_id' => $variant_id,
+                'qty' => $qty,
+                'price' => round($price, 2),
+                'total' => round($price * $qty, 2),
+
+                'is_bogo' => $item['is_bogo'] ?? 0,
+                'is_offer' => $item['is_offer'] ?? 0,
+                'offer_type' => $item['offer_type'] ?? null,
+                'discount_amount' => $item['discount_amount'] ?? null,
+
+                // ✅ IMAGE FROM DB (same as logged-in user)
+                'image' => !empty($product->image)
+                    ? asset('uploads/product/' . $product->image)
+                    : asset('assets/frontend/images/no-image.png'),
+            ];
         }
     }
+}
 
     return $cartItems;
 }

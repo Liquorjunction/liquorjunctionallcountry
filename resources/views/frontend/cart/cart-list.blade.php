@@ -486,11 +486,7 @@
                                 </tr>
                                 <tr>
                                     <td colspan="2">
-                                        @if(auth()->guard('user')->user()=='')
-                                            <a href="{{route('guest.login')}}" class="solid-button w-100">{{@Helper::language('checkout_as_guest')}}</a>    
-                                        @else
                                          <a href="{{route('checkout')}}"  class="solid-button w-100">{{@Helper::language('go_to_checkout')}}</a>    
-                                        @endif 
                                     </td>
                                 </tr>
                             </tbody>

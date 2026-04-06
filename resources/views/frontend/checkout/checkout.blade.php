@@ -757,16 +757,42 @@
                     <!-- End Edit Form -->
 
                     {{-- Existing Bill Address  --}}
+                    
+                    @php
+                    $user = auth()->guard('user')->user();
+                    @endphp
+
+                    @if($user && !$user->is_guest_user == 1)
                     <h5 class="mb-2 mt-5">Billing Address</h5>
+                    {{-- 🟢 Logged-in real user --}}
                     <div style="margin-top:20px;margin-bottom:20px;">
                         <div class="check-group">
-                            <input class="form-check-input" type="checkbox" value="" id="sameAddress" style=" transform: scale(1.3);margin-right: 10px;border: 1px solid #858584;">
-                            <label class="form-check-label"><span style="color: #858584 !important;cursor: default;font-size:20px;">Same as shipping address.</span></label>
+                            <input 
+                                class="form-check-input" 
+                                type="checkbox" 
+                                name="same_address"
+                                value="1"
+                                id="sameAddress"
+                                style="transform: scale(1.3); margin-right: 10px; border: 1px solid #858584;"
+                            >
+                            <label class="form-check-label">
+                                <span style="color: #858584; font-size:20px;">
+                                    Same as shipping address.
+                                </span>
+                            </label>
                         </div>
                     </div>
+
+                    {{-- Optional: billing form fields go here --}}
+
+                    @else
+                    {{-- 🟡 Guest user OR no user --}}
+                    {{-- Hide checkbox and send value automatically --}}
+                    <input type="hidden" name="same_address" value="1">
+                    @endif
                     
                     <div id="billingAddressContainer">
-                        @if($UserBillAddressData->isEmpty())
+                        @if($UserBillAddressData->isEmpty() && !$user->is_guest_user == 1)
                             <div class="mt-20">
                                 <a href="{{ route('add-bill-address') }}" ><u>Add New Billing Address.</u></a>
                             </div>

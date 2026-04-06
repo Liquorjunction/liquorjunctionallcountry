@@ -474,6 +474,7 @@ class WebsiteLoginController extends Controller
                     if ($userExist->is_otp_verify == 1) {
                         // Already verified guest user, log in and redirect
                         Auth::guard('user')->login($userExist);
+                        $this->mergeGuestCartToUser($userExist->id);
                         if (!empty($sessionCart)) {
                             return response()->json([
                                 'success' => 'true',

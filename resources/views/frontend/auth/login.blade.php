@@ -60,7 +60,10 @@
                             <div class="col-12">
                                 <button type="submit"
                                     class="solid-button w-100">{{ @Helper::language('login_label') }}</button>
-                                <a style="margin-top: 15px;" href="{{ route('guest.login') }}" class="solid-button w-100">{{ @Helper::language('login_as_guest') }}</a>
+                                                                    @php
+                                    $isCart = url()->previous() && str_contains(url()->previous(), 'cart');
+                                @endphp
+                                <a style="margin-top: 15px;" href="{{ route('guest.login') }}" class="solid-button w-100">{{ $isCart ? 'Checkout as Guest' : 'Continue as Guest' }}</a>
                                 <div class="registration-social">
                                     <p class="text-sm grey-text">{{ @Helper::language('login_or_continue_with') }}</p>
                                     <ul>
