@@ -234,8 +234,12 @@
                 },
                 success: function(response) {
                     $('.loader').css("visibility", "visible");
-                    var url = "{{route('websitesendotp')}}";
-                    window.location.href = url;
+                    if (response.redirect) {
+                        window.location.href = response.redirect;
+                    } else {
+                        var url = "{{ route('websitesendotp') }}";
+                        window.location.href = url;
+                    }
                 },
                 error: function(errors) {                  
                     $('.loader').css("visibility", "hidden");

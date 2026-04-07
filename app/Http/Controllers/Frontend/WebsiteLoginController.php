@@ -418,7 +418,7 @@ class WebsiteLoginController extends Controller
                         Rule::unique('main_users', 'email')
                             ->where(function ($query) {
                                 return $query->where('status', '!=', '2')
-                                    ->where('is_otp_verify', 1);
+                                    ->where('is_otp_verify', 1)->where('is_guest_user', '0');
                             }),
                     ],
                     'phone' => [
@@ -469,13 +469,15 @@ class WebsiteLoginController extends Controller
                     ->orWhere('phone', $request->phone);
             })->first();
             if ($userExist) {
-                if ($isGuest && $userExist->is_guest_user) {
-                    $sessionCart = session()->get('cart_info', []);
-                    if ($userExist->is_otp_verify == 1) {
-                        // Already verified guest user, log in and redirect
-                        Auth::guard('user')->login($userExist);
-                        $this->mergeGuestCartToUser($userExist->id);
-                        if (!empty($sessionCart)) {
+                if ($userExist->is_guest_user == 1) {
+
+        // ✅ Already verified → direct login
+        if ($request->has('is_guest_user') && $userExist->is_otp_verify == 1) {
+            $sessionCart = session()->get('cart_info', []);
+            Auth::guard('user')->login($userExist);
+           Helper::afterLoginAddUserCartItemData();
+
+            if (!empty($sessionCart)) {
                             return response()->json([
                                 'success' => 'true',
                                 'guest_otp' => true,
@@ -484,28 +486,50 @@ class WebsiteLoginController extends Controller
                         }else{
                             return response()->json(['success' => 'true', 'redirect' => route('frontend.home')]);
                         }
-                    } else {
-                        // If guest user exists, just log in and send OTP again
-                        $otp = mt_rand(1000, 9999);
-                        $userExist->otp = $otp;
-                        $userExist->otp_expire_time = now()->addMinutes(5)->toDateTimeString();
-                        $userExist->save();
+        }
 
-                        $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
-                        $url_link = \URL::to("/");
-                        $url = $url_link . '/';
-                        $email = $userExist->email;
-                        $name = $userExist->name ?? ($userExist->first_name ?? '');
-                        try {
-                            $this->attachment_otp_email($email, $otp, $name, $url, $logo);
-                        } catch (\Exception $e) {}
-                        \Session::put('otp_phone', $userExist->phone);
-                        \Session::put('email', $userExist->email);
-                        \Session::put('first_name', $userExist->first_name);
-                        \Session::put('phone_code', $userExist->phone_code);
-                        return response()->json(['success' => 'true', 'guest_otp' => true]);
-                    }
-                } else {
+        // ✅ NOT verified → depends on action
+
+        // 👉 If coming from LOGIN → send OTP
+        if ($request->has('is_guest_user')) {
+
+            $userExist->otp = mt_rand(1000, 9999);
+            $userExist->otp_expire_time = now()->addMinutes(5);
+            $userExist->save();
+
+            return response()->json([
+                'success' => 'true',
+                'guest_otp' => true
+            ]);
+        }
+
+        // 👉 If coming from REGISTER → convert to normal user (NO OTP)
+        else {
+            $userExist->first_name = $request->first_name;
+            $userExist->last_name = $request->last_name;
+            $userExist->age = $request->age;
+            $userExist->email = $request->email;
+            $userExist->phone = $request->phone;
+            $userExist->phone_code = $request->phone_code ?? $userExist->phone_code;
+
+            $userExist->is_guest_user = 0;
+            $userExist->is_otp_verify = 1; // ✅ IMPORTANT (skip OTP)
+            $userExist->status = 1;
+
+            if ($request->password) {
+                $userExist->password = Hash::make($request->password);
+            }
+
+            $userExist->save();
+            Auth::guard('user')->login($userExist);
+            Helper::afterLoginAddUserCartItemData();
+
+            return response()->json([
+                'success' => 'true',
+                'redirect' => route('frontend.home')
+            ]);
+        }
+    } else {
                     // For non-guest or non-guest-user, show already exists error as before
                     $errors = [];
                     if ($userExist->email === $request->email) {
@@ -799,7 +823,7 @@ class WebsiteLoginController extends Controller
                     Auth::guard('user')->login($user);
 
                     // 🔥 IMPORTANT: Merge session cart into DB (optional but recommended)
-                    $this->mergeGuestCartToUser($user->id);
+                    Helper::afterLoginAddUserCartItemData();
 
                     // Get updated cart
                     $cartItems = \Helper::getUserCartItems();

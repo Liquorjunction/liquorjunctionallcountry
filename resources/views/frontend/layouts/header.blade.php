@@ -507,6 +507,7 @@ if ($user_id) {
                                     </svg>
                                 </a>
                             </li>
+                            @if(auth()->guard('user')->check() && !auth()->guard('user')->user()->is_guest_user)
                             <li class="delivery">
                                 <a href="{{ route('trackOrder') }}"
                                     title="{{ @Helper::language('track_your_order') }}">
@@ -580,9 +581,10 @@ if ($user_id) {
                                     </svg>
                                 </a>
                             </li>
+                            @endif
 
 
-                            @if (!empty($user_id))
+                            @if (!empty($user_id) && !auth()->guard('user')->user()->is_guest_user)
                                 <li class="header-cart" style="top:3px;">
                                     <a href="javascript::void(0);" class="backdrop" title="Notification"
                                         onclick="return readNotification()" data-bs-toggle="offcanvas"
