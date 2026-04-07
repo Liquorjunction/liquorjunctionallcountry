@@ -46,13 +46,13 @@
                                 <li><a href="{{route('paymentOption')}}">{{@Helper::language('payment_options')}}</a></li>
                                 <li><a href="{{route('placingOrder')}}">{{@Helper::language('placing_your_order')}}</a></li>
                                 <li><a href="{{route('securityPrivacy')}}">{{@Helper::language('security_privacy')}}</a></li>
-                                <li><a href="{{route('termsCondition')}}">{{@Helper::language('terms_condition')}}</a></li>                                
-                                <li><a href="{{route('frontend.blog')}}">{{@Helper::language('lj_blog')}}</a></li>                                
+                                <li><a href="{{route('termsCondition')}}">{{@Helper::language('terms_condition')}}</a></li>
+                                <li><a href="{{route('frontend.blog')}}">{{@Helper::language('lj_blog')}}</a></li>
                             </ul>
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="col-lg-3 col-md-4 footer-col">
                     <div class="links-wrapper">
                         <div class="footer-link">
@@ -111,6 +111,14 @@
                             </ul>
                         </div>
 
+                        
+                        <div class="footer-link">
+                            <h6 class="mb-12">{{ 'Android' }}</h6>
+                            <a href="https://play.google.com/store/apps/details?id=com.liquor.junction" target="_blank"><img src="{{ asset('assets/frontend/images/ios-app.png')}}" style="height: 60px;" alt="icon_payment" title="icon_payment" /></a> 
+                            <br>
+                            <h6 class="mb-12">{{ 'Ios' }}</h6>
+                            <a href="https://apps.apple.com/in/app/liquor-junction-ghana-app/id6547853117" target="_blank"><img src="{{ asset('assets/frontend/images/android-app.png')}}" style="height: 60px;" alt="icon_payment" title="icon_payment" /></a>
+                        </div>
                         <div class="footer-link">
                             <h6 class="mb-12">{{@Helper::language('we_accept')}}</h6>
                             <img src="{{ asset('assets/frontend/images/iconimage1.png')}}" alt="icon_payment" title="icon_payment" />
