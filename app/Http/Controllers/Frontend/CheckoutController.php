@@ -2003,6 +2003,9 @@ class CheckoutController extends Controller
         Session::forget('buy_now_info');
         Session::forget('checkout_in_progress');
         Session::forget('checkout_page_load_time');
+        if ($userData && $userData->is_guest_user == 1) {
+            Auth::guard('user')->logout();
+        }
 
         return response()->json(['success' => true, 'order_id' => Helper::encodeUrl($order->id), 'earnedpoints' => $earnedpoints]);
     }
