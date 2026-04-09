@@ -61,7 +61,8 @@
                                 <button type="submit"
                                     class="solid-button w-100">{{ @Helper::language('login_label') }}</button>
                                                                     @php
-                                    $isCart = url()->previous() && str_contains(url()->previous(), 'cart');
+                                    $isCart = url()->previous() && str_contains(url()->previous(), 'cart') || str_contains(url()->previous(), 'product-details')
+;
                                 @endphp
                                 @if ($isCart)
                                 <a style="margin-top: 15px;" href="{{ route('guest.login') }}" class="solid-button w-100">{{ $isCart ? 'Checkout as Guest' : 'Continue as Guest' }}</a>
