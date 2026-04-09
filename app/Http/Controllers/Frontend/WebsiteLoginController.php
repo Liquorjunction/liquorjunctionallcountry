@@ -465,6 +465,7 @@ class WebsiteLoginController extends Controller
                 return response()->json($validator->errors(), 422);
             }
             $userExist = null;
+            $checkout_value = Session::get('checkout_value') ? Session::get('checkout_value') : 0;
             // Check if user exists
             if($request->has('is_guest_user')){
                 $value = $request->email;
@@ -513,7 +514,7 @@ class WebsiteLoginController extends Controller
                         Auth::guard('user')->login($userExist);
                         Helper::afterLoginAddUserCartItemData();
 
-                        if (!empty($sessionCart)) {
+                        if (!empty($sessionCart) || !empty($checkout_value)) {
                             return response()->json([
                                 'success' => 'true',
                                 'guest_otp' => true,
@@ -536,7 +537,7 @@ class WebsiteLoginController extends Controller
                             ]);
                         }
 
-                        if (!empty($sessionCart)) {
+                        if (!empty($sessionCart) || !empty($checkout_value)) {
                             return response()->json([
                                 'success' => 'true',
                                 'guest_otp' => true,
@@ -631,7 +632,7 @@ class WebsiteLoginController extends Controller
                     Auth::guard('user')->login($user);
                     Helper::afterLoginAddUserCartItemData();
 
-                    if (!empty($sessionCart)) {
+                    if (!empty($sessionCart) || !empty($checkout_value)) {
                             return response()->json([
                                 'success' => 'true',
                                 'guest_otp' => true,

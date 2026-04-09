@@ -9,7 +9,7 @@
     </svg>
 
     <!-- 🔴 Item Count -->
-    <span class="cart-item-total-count-floating" id="cartCount">3</span>
+    <span class="cart-item-total-count-floating" id="cartCount"></span>
 
 </div>
 </a>
