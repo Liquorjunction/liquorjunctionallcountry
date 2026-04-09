@@ -220,7 +220,7 @@ class UserController extends Controller
                 return response()->json($errors, 422);
             }
         } else if ($isGuest) {
-            // New guest user
+            // New guest user: direct login, no OTP validation required
             $user = new MainUser;
             $uniqid = uniqid();
             $user->uniqid = $uniqid;
@@ -241,25 +241,17 @@ class UserController extends Controller
             $user->phone = $phone;
             $user->age = $request->age ?? '';
             $user->phone_code = $request->phone_code ?? '';
-            $user->otp = $otp;
-            $user->is_otp_verify = 0;
+            $user->otp = null;
+            $user->otp_expire_time = null;
+            $user->is_otp_verify = 1; // Mark as verified
             $user->user_type = 1;
-            $user->status = 2;
+            $user->status = 1; // Mark as active
             $user->is_guest_user = 1;
+            $user->remember_token = $token;
             $user->save();
-            $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
-            $url_link = \URL::to("/");
-            $url = $url_link . '/';
-            $email = $user->email;
-            $name = $user->name ?? ($user->first_name ?? '');
-            $phonecode = $request->phone_code;
-            $otp_phone = $request->phone;
-            try {
-                $ismail = $this->attachment_otp_email($email, $otp, $name, $url, $logo);
-            } catch (\Exception $e) {}
             $response = [
-                'otp' => strval(@$user->otp ?: ''),
-                'otp_expire_time' => strval(@$user->otp_expire_time ?: ''),
+                'otp' => '',
+                'otp_expire_time' => '',
                 'uniqid' => strval(@$user->uniqid ?: ''),
                 'remember_token' => strval(@$user->remember_token ?: '')
             ];

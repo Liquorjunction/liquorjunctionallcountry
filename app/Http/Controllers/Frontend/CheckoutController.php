@@ -1925,6 +1925,10 @@ class CheckoutController extends Controller
 
         if ($payment_method == 1) {
             $grand_total_amount = $grand_total_amount;
+             if ($userData && $userData->is_guest_user == 1) {
+            Session::flush();
+            Auth::guard('user')->logout();
+        }
             $redirectUrl = route('orderSuccessCard', ['userid' => $user_id, 'orderid' => $order->id, 'amount' => $grand_total_amount, 'earnedpoints' => $earnedpoints]);
             $backUrl = url('/callBackUrl');
             $xmlPayload = '<?xml version=\"1.0\" encoding=\"utf-8\"?><API3G><CompanyToken>4CF16A78-27EA-47A7-B1D4-6E52343C8DC1</CompanyToken><Request>createToken</Request><Transaction><PaymentAmount>' . $grand_total_amount . '</PaymentAmount><PaymentCurrency>GHS</PaymentCurrency><CompanyRef>49FKEOA</CompanyRef><RedirectURL>' . $redirectUrl . '</RedirectURL><BackURL>' . $backUrl . '</BackURL><CompanyRefUnique>0</CompanyRefUnique><PTL>5</PTL>
