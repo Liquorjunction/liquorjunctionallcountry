@@ -63,7 +63,9 @@
                                                                     @php
                                     $isCart = url()->previous() && str_contains(url()->previous(), 'cart');
                                 @endphp
+                                @if ($isCart)
                                 <a style="margin-top: 15px;" href="{{ route('guest.login') }}" class="solid-button w-100">{{ $isCart ? 'Checkout as Guest' : 'Continue as Guest' }}</a>
+                                @endif
                                 <div class="registration-social">
                                     <p class="text-sm grey-text">{{ @Helper::language('login_or_continue_with') }}</p>
                                     <ul>

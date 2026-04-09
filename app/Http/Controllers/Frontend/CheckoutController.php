@@ -1618,23 +1618,24 @@ class CheckoutController extends Controller
         $order_tracking->order_status = 1;
         $order_tracking->status = 1;
         $order_tracking->save();
-
-        $order_info = new OrderInfo();
-        $order_info->order_id = $order->id;
-        if ($purchase_type == 1) {
-            $order_info->country_id = $user_address_data->country_id;
-            $order_info->region_id = $user_address_data->region_id;
-            $order_info->area_id = $user_address_data->area_id;
+        if($userData->email){
+            $order_info = new OrderInfo();
+            $order_info->order_id = $order->id;
+            if ($purchase_type == 1) {
+                $order_info->country_id = $user_address_data->country_id;
+                $order_info->region_id = $user_address_data->region_id;
+                $order_info->area_id = $user_address_data->area_id;
+            }
+            $order_info->customer_name = $userData->first_name . ' ' . $userData->last_name;
+            $order_info->customer_mobile = $userData->phone_code . ' ' . $userData->phone;
+            $order_info->customer_email = $userData->email ?? null;
+            $order_info->customer_country = ($userData->country_code) ?: '';
+            $order_info->order_from = '1';
+            if ($purchase_type == 2) {
+                $order_info->store_pickup_address = $store_address;
+            }
+            $order_info->save();
         }
-        $order_info->customer_name = $userData->first_name . ' ' . $userData->last_name;
-        $order_info->customer_mobile = $userData->phone_code . ' ' . $userData->phone;
-        $order_info->customer_email = $userData->email;
-        $order_info->customer_country = ($userData->country_code) ?: '';
-        $order_info->order_from = '1';
-        if ($purchase_type == 2) {
-            $order_info->store_pickup_address = $store_address;
-        }
-        $order_info->save();
 
         $original_price = 0;
         $total_discount_price = 0;

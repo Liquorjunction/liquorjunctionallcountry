@@ -359,9 +359,14 @@ class WebsiteLoginController extends Controller
     {
         // echo "string";exit();
         if (auth()->guard('user')->check()) {
-            $user_id = $this->user_id;
-            // echo "<pre>";print_r($user_id);exit();
+            $user = auth()->guard('user')->user();
+            // ✅ Only redirect REAL users
+            if ($user->is_guest_user == 0) {
+            $user_id = $user->id;
             return redirect()->route('frontend.home', compact('user_id'));
+            }else{
+            return view("frontend.auth.login");
+        }
         } else {
             // echo "string";exit();
             return view("frontend.auth.login");
@@ -372,8 +377,17 @@ class WebsiteLoginController extends Controller
     public function websiteRegisterForm()
     {
         if (auth()->guard('user')->check()) {
-            $user_id = $this->user_id;
+            $user = auth()->guard('user')->user();
+            // ✅ Only redirect REAL users
+            if ($user->is_guest_user == 0) {
+            $user_id = $user->id;
             return redirect()->route('frontend.home', compact('user_id'));
+        }else{
+            $phonecode = DB::table('countries')->orderby('phonecode', 'ASC')->where('status', 1)->get();
+            $countryData = DB::table('countries')->orderby('name')->where('status', 1)->get();
+            // dd($phonecode);
+            return view("frontend.auth.register", compact('phonecode', 'countryData'));
+        }
         } else {
 
             $phonecode = DB::table('countries')->orderby('phonecode', 'ASC')->where('status', 1)->get();
@@ -390,22 +404,10 @@ class WebsiteLoginController extends Controller
             $response = 1;
             $password = $request->input('password');
             $confirm_password = $request->input('confirm_password');
-
             // Validation rules
             if ($isGuest) {
                 $rules = [
-                    'first_name' => ['required', 'min:3', 'max:30'],
-                    'last_name' => ['required', 'min:3', 'max:30'],
-                    'age' => ['required', 'integer', 'min:18', 'max:100'],
-                    'email' => [
-                        'required',
-                        'email',
-                    ],
-                    'phone' => [
-                        'required',
-                        'min:8',
-                        'max:15',
-                    ],
+                    'name' => ['required', 'min:3', 'max:30'],
                 ];
             } else {
                 $rules = [
@@ -426,7 +428,7 @@ class WebsiteLoginController extends Controller
                         'min:8',
                         'max:15',
                         Rule::unique('main_users')->where(function ($query) {
-                            return $query->where('status', '!=', '2')->where('is_otp_verify', 1);
+                            return $query->where('status', '!=', '2')->where('is_otp_verify', 1)->where('is_guest_user', '0');
                         })
                     ],
                 ];
@@ -462,74 +464,115 @@ class WebsiteLoginController extends Controller
             if ($validator->fails()) {
                 return response()->json($validator->errors(), 422);
             }
-
+            $userExist = null;
             // Check if user exists
-            $userExist = MainUser::where(function ($query) use ($request) {
-                $query->where('email', $request->email)
-                    ->orWhere('phone', $request->phone);
-            })->first();
+            if($request->has('is_guest_user')){
+                $value = $request->email;
+
+                $email = null;
+                $phone = null;
+
+                if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
+                    $email = $value;
+                } elseif (preg_match('/^[0-9]{8,15}$/', $value)) {
+                    $phone = $value;
+                }
+                $userExist = MainUser::where(function ($query) use ($email, $phone) {
+                    if ($email) {
+                        $query->where('email', $email);
+                    }
+
+                    if ($phone) {
+                        $query->orWhere('phone', $phone);
+                    }
+                })->first();
+            }else{
+                $userExist = MainUser::where(function ($query) use ($request) {
+                    if ($request->email) {
+                        $query->where('email', $request->email);
+                    }
+
+                    if ($request->phone) {
+                        $query->orWhere('phone', $request->phone);
+                    }
+                })->first();
+            }
             if ($userExist) {
                 if ($userExist->is_guest_user == 1) {
 
-        // ✅ Already verified → direct login
-        if ($request->has('is_guest_user') && $userExist->is_otp_verify == 1) {
-            $sessionCart = session()->get('cart_info', []);
-            Auth::guard('user')->login($userExist);
-           Helper::afterLoginAddUserCartItemData();
+                    // ✅ Already verified → direct login
+                    $sessionCart = session()->get('cart_info', []);
+                    if ($request->has('is_guest_user') && $userExist->is_otp_verify == 1) {
+                        $value = request('email');
 
-            if (!empty($sessionCart)) {
+                        if (!filter_var($value, FILTER_VALIDATE_EMAIL) && !preg_match('/^[0-9]{8,15}$/', $value)) {
+                            return back()->withErrors([
+                                'email' => 'Enter valid email or phone number'
+                            ]);
+                        }
+                        Auth::guard('user')->login($userExist);
+                        Helper::afterLoginAddUserCartItemData();
+
+                        if (!empty($sessionCart)) {
                             return response()->json([
                                 'success' => 'true',
                                 'guest_otp' => true,
                                 'redirect' => route('checkout')
                             ]);
-                        }else{
+                        } else {
                             return response()->json(['success' => 'true', 'redirect' => route('frontend.home')]);
                         }
-        }
+                    }
 
-        // ✅ NOT verified → depends on action
+                    // ✅ NOT verified → depends on action
 
-        // 👉 If coming from LOGIN → send OTP
-        if ($request->has('is_guest_user')) {
+                    // 👉 If coming from LOGIN → send OTP
+                    if ($request->has('is_guest_user')) {
+                        $value = request('email');
 
-            $userExist->otp = mt_rand(1000, 9999);
-            $userExist->otp_expire_time = now()->addMinutes(5);
-            $userExist->save();
+                        if (!filter_var($value, FILTER_VALIDATE_EMAIL) && !preg_match('/^[0-9]{8,15}$/', $value)) {
+                            return back()->withErrors([
+                                'email' => 'Enter valid email or phone number'
+                            ]);
+                        }
 
-            return response()->json([
-                'success' => 'true',
-                'guest_otp' => true
-            ]);
-        }
+                        if (!empty($sessionCart)) {
+                            return response()->json([
+                                'success' => 'true',
+                                'guest_otp' => true,
+                                'redirect' => route('checkout')
+                            ]);
+                        } else {
+                            return response()->json(['success' => 'true', 'redirect' => route('frontend.home')]);
+                        }
+                    }
+                    // 👉 If coming from REGISTER → convert to normal user (NO OTP)
+                    else {
+                        $userExist->first_name = $request->first_name;
+                        $userExist->last_name = $request->last_name;
+                        $userExist->age = $request->age;
+                        $userExist->email = $request->email;
+                        $userExist->phone = $request->phone;
+                        $userExist->phone_code = $request->phone_code ?? $userExist->phone_code;
 
-        // 👉 If coming from REGISTER → convert to normal user (NO OTP)
-        else {
-            $userExist->first_name = $request->first_name;
-            $userExist->last_name = $request->last_name;
-            $userExist->age = $request->age;
-            $userExist->email = $request->email;
-            $userExist->phone = $request->phone;
-            $userExist->phone_code = $request->phone_code ?? $userExist->phone_code;
+                        $userExist->is_guest_user = 0;
+                        $userExist->is_otp_verify = 1; // ✅ IMPORTANT (skip OTP)
+                        $userExist->status = 1;
 
-            $userExist->is_guest_user = 0;
-            $userExist->is_otp_verify = 1; // ✅ IMPORTANT (skip OTP)
-            $userExist->status = 1;
+                        if ($request->password) {
+                            $userExist->password = Hash::make($request->password);
+                        }
 
-            if ($request->password) {
-                $userExist->password = Hash::make($request->password);
-            }
+                        $userExist->save();
+                        Auth::guard('user')->login($userExist);
+                        Helper::afterLoginAddUserCartItemData();
 
-            $userExist->save();
-            Auth::guard('user')->login($userExist);
-            Helper::afterLoginAddUserCartItemData();
-
-            return response()->json([
-                'success' => 'true',
-                'redirect' => route('frontend.home')
-            ]);
-        }
-    } else {
+                        return response()->json([
+                            'success' => 'true',
+                            'redirect' => route('frontend.home')
+                        ]);
+                    }
+                } else {
                     // For non-guest or non-guest-user, show already exists error as before
                     $errors = [];
                     if ($userExist->email === $request->email) {
@@ -541,8 +584,63 @@ class WebsiteLoginController extends Controller
                     Alert::warning('Warning', $errors);
                     return response()->json($errors, 422);
                 }
-            }
+            }else if($request->has('is_guest_user')){
+                    $sessionCart = session()->get('cart_info', []);
 
+                    $user = new MainUser;
+                    $uniqid = uniqid();
+                    $user->uniqid = $uniqid;
+                    $user->label_type = 1;
+
+                    $user->first_name = $request->name ?? '';
+                    $user->last_name  = $request->last_name ?? '';
+
+                    $value = $request->email;
+
+                    $email = null;
+                    $phone = null;
+
+                    if (!empty($value)) {
+                        if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
+                            $email = $value;
+                        } elseif (preg_match('/^[0-9]{8,15}$/', $value)) {
+                            $phone = $value;
+                        }
+                    }
+
+                    $user->email = $email;
+                    $user->phone = $phone;
+
+                    $user->age = $request->age ?? '';
+                    $user->phone_code = $request->phone_code ?? '';
+
+                    $user->otp = 1010;
+                    $user->is_otp_verify = 1;
+
+                    $user->user_type = 1;
+
+                    $user->status = $isGuest ? 1 : 1;
+
+                    $user->is_guest_user = $isGuest ? 1 : 0;
+
+                    if (!$isGuest && !empty($request->password)) {
+                        $user->password = Hash::make($request->password);
+                    }
+
+                    $user->save();
+                    Auth::guard('user')->login($user);
+                    Helper::afterLoginAddUserCartItemData();
+
+                    if (!empty($sessionCart)) {
+                            return response()->json([
+                                'success' => 'true',
+                                'guest_otp' => true,
+                                'redirect' => route('checkout')
+                            ]);
+                        } else {
+                            return response()->json(['success' => 'true', 'redirect' => route('frontend.home')]);
+                        }
+            }
             \Session::put('otp_phone', $request->phone);
             \Session::put('email', $request->email);
             \Session::put('first_name', $request->first_name);
@@ -584,7 +682,8 @@ class WebsiteLoginController extends Controller
                     "+" . $phonecode . $otp_phone,
                     'Dear Customer, Your OTP for login is ' . $otp . ' and it will be valid for 5 Mins - Liquor Junction Ghana.'
                 );
-            } catch (\Exception $e) {}
+            } catch (\Exception $e) {
+            }
             return response()->json(['success' => 'true', 'guest_otp' => $isGuest]);
         }
         abort(404);
@@ -849,54 +948,55 @@ class WebsiteLoginController extends Controller
     }
 
     private function mergeGuestCartToUser($userId)
-{
-    $sessionCart = session()->get('cart_info', []);
+    {
+        $sessionCart = session()->get('cart_info', []);
 
-    if (empty($sessionCart)) return;
+        if (empty($sessionCart))
+            return;
 
-    foreach ($sessionCart as $product_id => $variants) {
+        foreach ($sessionCart as $product_id => $variants) {
 
-        foreach ($variants as $variant_id => $item) {
+            foreach ($variants as $variant_id => $item) {
 
-            $exists = \DB::table('cart')
-                ->where('user_id', $userId)
-                ->where('product_id', $product_id)
-                ->where('product_variant_id', $variant_id)
-                ->where('status', 1)
-                ->first();
+                $exists = \DB::table('cart')
+                    ->where('user_id', $userId)
+                    ->where('product_id', $product_id)
+                    ->where('product_variant_id', $variant_id)
+                    ->where('status', 1)
+                    ->first();
 
-            if ($exists) {
-                // Update quantity
-                \DB::table('cart')
-                    ->where('id', $exists->id)
-                    ->update([
-                        'quantity' => $exists->quantity + ($item['quantity'] ?? 1)
+                if ($exists) {
+                    // Update quantity
+                    \DB::table('cart')
+                        ->where('id', $exists->id)
+                        ->update([
+                            'quantity' => $exists->quantity + ($item['quantity'] ?? 1)
+                        ]);
+                } else {
+                    \DB::table('cart')->insert([
+                        'uniqid' => uniqid(),
+                        'user_id' => $userId,
+                        'product_id' => $product_id,
+                        'product_variant_id' => $variant_id,
+                        'quantity' => $item['quantity'] ?? 1,
+                        'product_price' => 0, // optional (you can recalc)
+                        'offer_price' => 0,
+                        'total_price' => 0,
+                        'is_bogo' => $item['is_bogo'] ?? 0,
+                        'is_offer' => $item['is_offer'] ?? 0,
+                        'offer_type' => $item['offer_type'] ?? null,
+                        'discount_amount' => $item['discount_amount'] ?? null,
+                        'status' => 1,
+                        'created_at' => now(),
+                        'updated_at' => now(),
                     ]);
-            } else {
-                \DB::table('cart')->insert([
-                    'uniqid' => uniqid(),
-                    'user_id' => $userId,
-                    'product_id' => $product_id,
-                    'product_variant_id' => $variant_id,
-                    'quantity' => $item['quantity'] ?? 1,
-                    'product_price' => 0, // optional (you can recalc)
-                    'offer_price' => 0,
-                    'total_price' => 0,
-                    'is_bogo' => $item['is_bogo'] ?? 0,
-                    'is_offer' => $item['is_offer'] ?? 0,
-                    'offer_type' => $item['offer_type'] ?? null,
-                    'discount_amount' => $item['discount_amount'] ?? null,
-                    'status' => 1,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
+                }
             }
         }
-    }
 
-    // 🧹 Clear session cart after merge
-    session()->forget('cart_info');
-}
+        // 🧹 Clear session cart after merge
+        session()->forget('cart_info');
+    }
 
     public function websiteResendOtpForm(Request $request)
     {

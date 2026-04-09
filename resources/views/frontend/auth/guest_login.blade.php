@@ -28,22 +28,11 @@
                             </div>
                             <div class="col-12">
                                 <div class="form-group">
-                                    <label for="age">Age<span class="valid_field">*</span></label>
-                                    <input type="number" name="age" id="age" placeholder="Enter Age"
-                                        min="18" max="100" step="1" required>
-                                </div>
-                            </div>
-                            <div class="col-12">
-                                <div class="form-group">
-                                    <label for="email">Email<span class="valid_field">*</span></label>
-                                    <input type="email" name="email" id="email" placeholder="Enter Email" required>
-                                </div>
-                            </div>
-                            <div class="col-12">
-                                <div class="form-group">
-                                    <label for="phone">Phone Number<span class="valid_field">*</span></label>
-                                    <input type="text" name="phone" id="phone" placeholder="Enter Phone Number"
-                                        required>
+                                    <label for="">{{ @Helper::language('email_label') }} /
+                                        {{ @Helper::language('phone_number') }}<span class="valid_field">*</span></label>
+                                    <input type="text"
+                                        placeholder="{{ @Helper::language('enter_email_place') }} / {{ @Helper::language('phone_number') }}"
+                                        name="email" id="email" required>
                                 </div>
                             </div>
                             <div class="col-12">
@@ -129,20 +118,11 @@
                     var errors = errors.responseJSON;
                     $("#guest-error").text('');
                     if (errors && typeof errors === 'object') {
-                        if (errors.first_name) {
-                            $("#guest-error").text(errors.first_name[0]);
-                        }
-                        if (errors.last_name) {
-                            $("#guest-error").text(errors.last_name[0]);
-                        }
-                        if (errors.age) {
-                            $("#guest-error").text(errors.age[0]);
+                        if (errors.name) {
+                            $("#guest-error").text(errors.name[0]);
                         }
                         if (errors.email) {
                             $("#guest-error").text(errors.email[0]);
-                        }
-                        if (errors.phone) {
-                            $("#guest-error").text(errors.phone[0]);
                         }
                     } else {
                         $("#guest-error").text('An error occurred. Please try again.');

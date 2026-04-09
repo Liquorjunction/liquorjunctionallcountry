@@ -740,7 +740,7 @@ if ($user_id) {
                                             @endif
                                         </div>
                                         <div style="padding:15px; border-top:1px solid #eee; background:#fafafa;">
-                                            <a href="{{ route('cart') }}" class="solid-button w-100">Checkout</a>
+                                            <a href="{{ route('cart') }}" class="solid-button w-100">Go To Cart</a>
                                         </div>
                                     </div>
                                 </div>

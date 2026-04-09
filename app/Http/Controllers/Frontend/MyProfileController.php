@@ -711,13 +711,15 @@ class MyProfileController extends Controller
             Auth::guard('user')->logout();
             Session::flush();
         }
-
-        if($userdata->remember_token == null){
+        if($userdata->is_guest_user != 1){
+                    if($userdata->remember_token == null){
             $remember_token = \Str::random(64);
             MainUser::where('id', $user_id)->update(['remember_token' => $remember_token ]);
         }else{
             MainUser::where('id', $user_id)->update(['remember_token' => $userdata->remember_token ]);
         }
+        }
+
         /*\Cookie::queue(\Cookie::forget('admin_email'));
         \Cookie::queue(\Cookie::forget('admin_password'));*/
         return response()->json(['success' => 'true']);
