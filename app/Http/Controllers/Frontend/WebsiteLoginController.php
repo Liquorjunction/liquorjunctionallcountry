@@ -468,7 +468,7 @@ class WebsiteLoginController extends Controller
             $checkout_value = Session::get('checkout_value') ? Session::get('checkout_value') : 0;
             // Check if user exists
             if($request->has('is_guest_user')){
-                $value = $request->email;
+                $value = trim($request->email);
 
                 $email = null;
                 $phone = null;
@@ -478,6 +478,7 @@ class WebsiteLoginController extends Controller
                 } elseif (preg_match('/^[0-9]{8,15}$/', $value)) {
                     $phone = $value;
                 }
+
                 $userExist = MainUser::where(function ($query) use ($email, $phone) {
                     if ($email) {
                         $query->where('email', $email);
@@ -576,11 +577,20 @@ class WebsiteLoginController extends Controller
                 } else {
                     // For non-guest or non-guest-user, show already exists error as before
                     $errors = [];
-                    if ($userExist->email === $request->email) {
+                    if($request->has('is_guest_user')){
+                        if ($userExist->email === $request->email) {
                         $errors['email'] = ['The email address is already registered.'];
-                    }
-                    if ($userExist->phone === $request->phone) {
-                        $errors['phone'] = ['The phone number is already registered.'];
+                        }
+                        if ($userExist->phone === $request->email) {
+                            $errors['email'] = ['The phone number is already registered.'];
+                        }
+                    }else{
+                        if ($userExist->email === $request->email) {
+                        $errors['email'] = ['The email address is already registered.'];
+                        }
+                        if ($userExist->phone === $request->phone) {
+                            $errors['phone'] = ['The phone number is already registered.'];
+                        }
                     }
                     Alert::warning('Warning', $errors);
                     return response()->json($errors, 422);
