@@ -1618,7 +1618,7 @@ class CheckoutController extends Controller
         $order_tracking->order_status = 1;
         $order_tracking->status = 1;
         $order_tracking->save();
-        if($userData->email){
+        // if($userData->email){
             $order_info = new OrderInfo();
             $order_info->order_id = $order->id;
             if ($purchase_type == 1) {
@@ -1635,7 +1635,7 @@ class CheckoutController extends Controller
                 $order_info->store_pickup_address = $store_address;
             }
             $order_info->save();
-        }
+        // }
 
         $original_price = 0;
         $total_discount_price = 0;

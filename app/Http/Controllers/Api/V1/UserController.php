@@ -66,181 +66,253 @@ class UserController extends Controller
 
     public function register(Request $request)
     {
-        $result = [];
+        // --- Begin new logic to match websiteRegister ---
         $isGuest = $request->input('is_guest_user') == 1;
         $otp = mt_rand(1000, 9999);
         $otp_expire_time = Carbon::now()->addMinutes(5)->toDateTimeString();
         $token = $this->generateToken();
 
-        // Validation rules
-        $rules = [
-            'firstname' => 'required',
-            'age' => 'required|integer|min:18',
-            'device_type' => 'required',
-        ];
+        // Validation rules and messages
         if ($isGuest) {
-            $rules['email'] = 'required|email';
-            $rules['phone_number'] = 'required';
-            $rules['phone_code'] = 'required';
+            $rules = [
+                'name' => ['required', 'min:3', 'max:30'],
+            ];
         } else {
-            $rules['lastname'] = 'required';
-            $rules['email'] = [
-                'required',
-                'email',
-                Rule::unique('main_users', 'email')->where(function ($query) {
-                    return $query->where('status', '!=', '2')->where('is_otp_verify', 1)->where('is_guest_user', '0');
-                }),
+            $rules = [
+                'first_name' => ['required', 'min:3', 'max:30'],
+                'last_name' => ['required', 'min:3', 'max:30'],
+                'age' => ['required', 'integer', 'min:18', 'max:100'],
+                'email' => [
+                    'required',
+                    'email',
+                    Rule::unique('main_users', 'email')->where(function ($query) {
+                        return $query->where('status', '!=', '2')->where('is_otp_verify', 1)->where('is_guest_user', '0');
+                    }),
+                ],
+                'phone' => [
+                    'required',
+                    'min:8',
+                    'max:15',
+                    Rule::unique('main_users')->where(function ($query) {
+                        return $query->where('status', '!=', '2')->where('is_otp_verify', 1)->where('is_guest_user', '0');
+                    })
+                ],
             ];
-            $rules['phone_number'] = [
-                'required',
-                Rule::unique('main_users', 'phone')->where(function ($query) {
-                    return $query->where('status', '!=', '2')->where('is_otp_verify', 1)->where('is_guest_user', '0');
-                }),
-            ];
-            $rules['phone_code'] = 'required';
+        }
+        $messages = [
+            'first_name.required' => \Helper::language('first_name_required'),
+            'first_name.min' => \Helper::language('first_name_min_valiadation_msg'),
+            'first_name.max' => \Helper::language('first_name_max_validation'),
+            'last_name.required' => \Helper::language('last_name_field_is_required'),
+            'last_name.min' => \Helper::language('last_name_min_valiadation_msg'),
+            'last_name.max' => \Helper::language('last_name_max_validation'),
+            'age.required' => 'Age field is required',
+            'age.min' => 'Minimum age allowed is 18',
+            'age.max' => 'Maximum age allowed is 100',
+            'email.required' => \Helper::language('email_field_required'),
+            'email.email' => \Helper::language('enter_valid_email_validation'),
+            'phone.required' => \Helper::language('phone_number_field_is_required'),
+            'phone.min' => \Helper::language('phone_number_min_max'),
+            'phone.max' => \Helper::language('phone_number_min_max'),
+            'phone.unique' => 'The phone number already exists',
+        ];
+        if (!$isGuest) {
             $rules['password'] = 'required|min:6';
+            $rules['confirm_password'] = 'required|same:password|min:6';
+            $messages['password.required'] = \Helper::language('password_field_required_validation');
+            $messages['password.min'] = \Helper::language('password_length');
+            $messages['confirm_password.required'] = \Helper::language('confirm_password_required');
+            $messages['confirm_password.min'] = \Helper::language('confirm_password_len');
+            $messages['confirm_password.same'] = 'The password and confirm password field does not match.';
         }
 
-        $validator = Validator::make($request->all(), $rules);
+        $validator = \Validator::make($request->all(), $rules, $messages);
         if ($validator->fails()) {
-            return response()->json([
-                'status_code' => strval(0),
-                'error' => $validator->messages(),
-                'data' => null
-            ], 200);
+            return response()->json($validator->errors(), 422);
         }
 
-        // Age check
-        if ($request->age < 18) {
-            $result['code'] = strval(-4);
-            $result['message'] = 'user_must_be_older_than_18';
-            return response()->json(new \App\Http\Resources\V1\SettingResource($result));
+        // User existence check
+        $userExist = null;
+        if ($isGuest) {
+            $value = trim($request->email);
+            $email = null;
+            $phone = null;
+            if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
+                $email = $value;
+            } elseif (preg_match('/^[0-9]{8,15}$/', $value)) {
+                $phone = $value;
+            }
+            $userExist = MainUser::where(function ($query) use ($email, $phone) {
+                if ($email) {
+                    $query->where('email', $email);
+                }
+                if ($phone) {
+                    $query->orWhere('phone', $phone);
+                }
+            })->first();
+        } else {
+            $userExist = MainUser::where(function ($query) use ($request) {
+                if ($request->email) {
+                    $query->where('email', $request->email);
+                }
+                if ($request->phone) {
+                    $query->orWhere('phone', $request->phone);
+                }
+            })->first();
         }
 
-        // Guest user logic
-        $userExist = MainUser::where(function ($query) use ($request) {
-            $query->where('email', $request->email)
-                ->orWhere('phone', $request->phone_number);
-        })->first();
-
-        if ($userExist && $userExist->is_guest_user == 1) {
-            // Already verified → direct login
-            if ($userExist->is_otp_verify == 1) {
+        if ($userExist) {
+            if ($userExist->is_guest_user == 1) {
+                // Already verified → direct login
+                if ($isGuest && $userExist->is_otp_verify == 1) {
+                    $response = [
+                        'otp' => '',
+                        'otp_expire_time' => '',
+                        'uniqid' => strval(@$userExist->uniqid ?: ''),
+                        'remember_token' => strval(@$userExist->remember_token ?: '')
+                    ];
+                    return response()->json([
+                        'success' => 'true',
+                        'guest_otp' => true,
+                        'result' => $response,
+                        'redirect' => 'checkout',
+                    ]);
+                }
+                // Not verified → resend OTP
+                $userExist->otp = $otp;
+                $userExist->otp_expire_time = $otp_expire_time;
+                $userExist->save();
+                $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
+                $url_link = \URL::to("/");
+                try {
+                    $this->attachment_otp_email($userExist->email, $otp, $userExist->first_name, $logo, $url_link);
+                } catch (\Exception $e) {}
                 $response = [
-                    'otp' => '',
-                    'otp_expire_time' => '',
+                    'otp' => strval(@$userExist->otp ?: ''),
+                    'otp_expire_time' => strval(@$userExist->otp_expire_time ?: ''),
                     'uniqid' => strval(@$userExist->uniqid ?: ''),
                     'remember_token' => strval(@$userExist->remember_token ?: '')
                 ];
-                $result['code'] = strval(1);
-                $result['message'] = 'guest_user_logged_in';
-                $result['result'] = $response;
-                return response()->json(new \App\Http\Resources\V1\SettingResource($result));
+                return response()->json([
+                    'success' => 'true',
+                    'guest_otp' => true,
+                    'result' => $response,
+                    'redirect' => 'checkout',
+                ]);
+            } else {
+                // For non-guest or non-guest-user, show already exists error as before
+                $errors = [];
+                if ($isGuest) {
+                    if ($userExist->email === $request->email) {
+                        $errors['email'] = ['The email address is already registered.'];
+                    }
+                    if ($userExist->phone === $request->email) {
+                        $errors['email'] = ['The phone number is already registered.'];
+                    }
+                } else {
+                    if ($userExist->email === $request->email) {
+                        $errors['email'] = ['The email address is already registered.'];
+                    }
+                    if ($userExist->phone === $request->phone) {
+                        $errors['phone'] = ['The phone number is already registered.'];
+                    }
+                }
+                return response()->json($errors, 422);
             }
-            // Not verified → resend OTP
-            $userExist->otp = $otp;
-            $userExist->otp_expire_time = $otp_expire_time;
-            $userExist->save();
-            $logo = Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
-            $url_link = URL::to("/");
+        } else if ($isGuest) {
+            // New guest user
+            $user = new MainUser;
+            $uniqid = uniqid();
+            $user->uniqid = $uniqid;
+            $user->label_type = 1;
+            $user->first_name = $request->name ?? '';
+            $user->last_name  = $request->last_name ?? '';
+            $value = $request->email;
+            $email = null;
+            $phone = null;
+            if (!empty($value)) {
+                if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
+                    $email = $value;
+                } elseif (preg_match('/^[0-9]{8,15}$/', $value)) {
+                    $phone = $value;
+                }
+            }
+            $user->email = $email;
+            $user->phone = $phone;
+            $user->age = $request->age ?? '';
+            $user->phone_code = $request->phone_code ?? '';
+            $user->otp = $otp;
+            $user->is_otp_verify = 0;
+            $user->user_type = 1;
+            $user->status = 2;
+            $user->is_guest_user = 1;
+            $user->save();
+            $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
+            $url_link = \URL::to("/");
+            $url = $url_link . '/';
+            $email = $user->email;
+            $name = $user->name ?? ($user->first_name ?? '');
+            $phonecode = $request->phone_code;
+            $otp_phone = $request->phone;
             try {
-                $this->attachment_otp_email($userExist->email, $otp, $userExist->first_name, $logo, $url_link);
+                $ismail = $this->attachment_otp_email($email, $otp, $name, $url, $logo);
             } catch (\Exception $e) {}
             $response = [
-                'otp' => strval(@$userExist->otp ?: ''),
-                'otp_expire_time' => strval(@$userExist->otp_expire_time ?: ''),
-                'uniqid' => strval(@$userExist->uniqid ?: ''),
-                'remember_token' => strval(@$userExist->remember_token ?: '')
+                'otp' => strval(@$user->otp ?: ''),
+                'otp_expire_time' => strval(@$user->otp_expire_time ?: ''),
+                'uniqid' => strval(@$user->uniqid ?: ''),
+                'remember_token' => strval(@$user->remember_token ?: '')
             ];
-            $result['code'] = strval(1);
-            $result['message'] = 'otp resent';
-            $result['result'] = $response;
-            return response()->json(new \App\Http\Resources\V1\SettingResource($result));
+            return response()->json([
+                'success' => 'true',
+                'guest_otp' => true,
+                'result' => $response,
+                'redirect' => 'checkout',
+            ]);
         }
 
-        // Guest user upgrade to normal user
-        if ($userExist && $userExist->is_guest_user == 1 && !$isGuest) {
-            $userExist->first_name = $request->input('firstname');
-            $userExist->last_name = $request->input('lastname');
-            $userExist->age = $request->input('age');
-            $userExist->email = $request->input('email');
-            $userExist->phone = $request->input('phone_number');
-            $userExist->phone_code = $request->input('phone_code') ?? $userExist->phone_code;
-            $userExist->is_guest_user = 0;
-            $userExist->is_otp_verify = 1;
-            $userExist->status = 1;
-            if ($request->has('password')) {
-                $userExist->password = bcrypt($request->input('password'));
-            }
-            $userExist->save();
-            $response = [
-                'otp' => '',
-                'otp_expire_time' => '',
-                'uniqid' => strval(@$userExist->uniqid ?: ''),
-                'remember_token' => strval(@$userExist->remember_token ?: '')
-            ];
-            $result['code'] = strval(1);
-            $result['message'] = 'guest_upgraded_to_user';
-            $result['result'] = $response;
-            return response()->json(new \App\Http\Resources\V1\SettingResource($result));
-        }
-
-        // If user exists and is not guest, show already exists error
-        if ($userExist && $userExist->is_guest_user == 0) {
-            $errors = [];
-            if ($userExist->email === $request->email) {
-                $errors['email'] = ['The email address is already registered.'];
-            }
-            if ($userExist->phone === $request->phone_number) {
-                $errors['phone'] = ['The phone number is already registered.'];
-            }
-            $result['code'] = strval(-2);
-            $result['message'] = 'already_registered';
-            $result['result'] = $errors;
-            return response()->json(new \App\Http\Resources\V1\SettingResource($result));
-        }
-
-        // Create new user (guest or normal)
-        $users = new MainUser();
-        $users->uniqid = uniqid();
-        $users->first_name = $request->input('firstname');
-        $users->last_name = $request->input('lastname', '');
-        $users->email = $request->input('email');
-        $users->age = $request->input('age');
-        $users->phone = $request->input('phone_number');
-        $users->phone_code = $request->input('phone_code');
-        $users->otp = $otp;
-        $users->otp_expire_time = $otp_expire_time;
-        $users->remember_token = $token;
-        $users->status = $isGuest ? 2 : 1; // 2 = pending verification for guest
-        $users->is_verify_user = 0;
-        $users->is_guest_user = $isGuest ? 1 : 0;
-        $users->is_phone = $request->input('device_type');
-        if (!$isGuest && $request->has('password')) {
-            $users->password = bcrypt($request->input('password'));
-        }
-        if ($users->save()) {
-            $logo = Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
-            $url_link = URL::to("/");
-            try {
-                $this->attachment_otp_email($users->email, $otp, $users->first_name, $logo, $url_link);
-            } catch (\Exception $e) {}
-            $response = [
-                'otp' => strval(@$users->otp ?: ''),
-                'otp_expire_time' => strval(@$users->otp_expire_time ?: ''),
-                'uniqid' => strval(@$users->uniqid ?: ''),
-                'remember_token' => strval(@$users->remember_token ?: '')
-            ];
-            $result['code'] = strval(1);
-            $result['message'] = 'otp sent';
-            $result['result'] = $response;
-            return response()->json(new \App\Http\Resources\V1\SettingResource($result));
-        } else {
-            $result['code'] = strval(0);
-            $result['message'] = 'something_went_wrong';
-            $result['result'] = [];
-            return response()->json(new \App\Http\Resources\V1\SettingResource($result));
-        }
+        // New normal user
+        $user = new MainUser;
+        $uniqid = uniqid();
+        $user->uniqid = $uniqid;
+        $user->label_type = 1;
+        $user->first_name = $request->first_name ?? '';
+        $user->last_name = $request->last_name ?? '';
+        $user->email = $request->email ?? '';
+        $user->age = $request->age ?? '';
+        $user->phone = $request->phone ?? '';
+        $user->phone_code = $request->phone_code ?? '';
+        $user->otp = $otp;
+        $user->otp_expire_time = $otp_expire_time;
+        $user->user_type = 1;
+        $user->status = 1;
+        $user->is_guest_user = 0;
+        $user->is_otp_verify = 0;
+        $user->password = isset($request->password) ? \Hash::make($request->password) : '';
+        $user->save();
+        $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
+        $url_link = \URL::to("/");
+        $url = $url_link . '/';
+        $email = $user->email;
+        $name = $user->name ?? ($user->first_name ?? '');
+        $phonecode = $request->phone_code;
+        $otp_phone = $request->phone;
+        try {
+            $ismail = $this->attachment_otp_email($email, $otp, $name, $url, $logo);
+        } catch (\Exception $e) {}
+        $response = [
+            'otp' => strval(@$user->otp ?: ''),
+            'otp_expire_time' => strval(@$user->otp_expire_time ?: ''),
+            'uniqid' => strval(@$user->uniqid ?: ''),
+            'remember_token' => strval(@$user->remember_token ?: '')
+        ];
+        return response()->json([
+            'success' => 'true',
+            'guest_otp' => false,
+            'result' => $response,
+            'redirect' => 'login',
+        ]);
+        // --- End new logic ---
     }
 
 
