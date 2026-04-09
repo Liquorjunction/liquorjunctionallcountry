@@ -369,6 +369,7 @@ class CustomerController extends Controller
                 ->leftJoin('countries', 'countries.phonecode', '=', 'main_users.phone_code')
                 ->leftJoin(DB::raw('(SELECT user_id, SUM(points) as earned_points FROM loyalty_points WHERE type = "credit" AND order_id IN (SELECT order_id FROM `order` WHERE order_status = 3) GROUP BY user_id) as earned'), 'earned.user_id', '=', 'main_users.id')
                 ->leftJoin(DB::raw('(SELECT user_id, SUM(points) as spent_points FROM loyalty_points WHERE type = "debit" GROUP BY user_id) as spent'), 'spent.user_id', '=', 'main_users.id')
+                ->where('main_users.is_guest_user', 0) 
                 ->select(
                     'main_users.*',
                     'countries.phonecode as phonecode',

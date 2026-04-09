@@ -2021,8 +2021,9 @@
         // Check user Details
         var userName = $('#userName').val();
         var userPhone = $('#userPhone').val();
-
-        if (!userName || !userPhone) {
+        console.log(userName , userPhone);
+        // if (!userName || !userPhone) {
+        if (!userName) {
         Swal.fire({
             icon: "warning",
             title: "Missing Information",
