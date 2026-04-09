@@ -2004,6 +2004,7 @@ class CheckoutController extends Controller
         Session::forget('checkout_in_progress');
         Session::forget('checkout_page_load_time');
         if ($userData && $userData->is_guest_user == 1) {
+            Session::flush();
             Auth::guard('user')->logout();
         }
 
