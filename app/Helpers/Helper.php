@@ -2295,7 +2295,7 @@ if (!empty($sessionCart)) {
             return false;
         }
 
-        $useVerify = self::usesTwilioVerify() || ((string) ($user->otp ?? '') === 'VERIFY');
+        $useVerify = ((string) ($user->otp ?? '') === 'VERIFY');
         if ($useVerify) {
             $to = self::formatE164Phone($user->phone, $phoneCode ?: ($user->phone_code ?? '233'));
             return self::checkTwilioVerifyOtp($to, $otp);

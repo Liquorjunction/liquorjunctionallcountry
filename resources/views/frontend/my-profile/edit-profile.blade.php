@@ -59,8 +59,8 @@
                             <div class="form-group has-validation">
                                 <label for="">
                                     {{@Helper::language('phone_number')}}<span class="text-red">*</span>
-                                    <span id="phoneVerifiedBadge" class="phone-verified-badge" style="{{ (int)@$myProfile->is_otp_verify === 1 ? '' : 'display:none;' }}">Verified</span>
-                                    <span id="phoneUnverifiedBadge" class="phone-unverified-badge" style="{{ (int)@$myProfile->is_otp_verify === 1 ? 'display:none;' : '' }}">Not Verified</span>
+                                    <span id="phoneVerifiedBadge" class="phone-verified-badge" style="{{ (int)@$myProfile->is_otp_verify === 1 ? '' : 'display:none;' }}">Mobile Verified</span>
+                                    <span id="phoneUnverifiedBadge" class="phone-unverified-badge" style="{{ (int)@$myProfile->is_otp_verify === 1 ? 'display:none;' : '' }}">Mobile Not Verified</span>
                                 </label>
                                 <div class="input-group phone-number">
                                     <select class="numbers" name="phone_code" id="phone_code">

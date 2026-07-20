@@ -94,7 +94,7 @@ class UserController extends Controller
                     'required',
                     'email',
                     Rule::unique('main_users', 'email')->where(function ($query) {
-                        return $query->where('status', '!=', '2')->where('is_otp_verify', 1)->where('is_guest_user', '0');
+                        return $query->where('status', '1')->where('is_guest_user', '0');
                     }),
                 ],
                'phone' => [
@@ -102,8 +102,7 @@ class UserController extends Controller
     'min:8',
     'max:15',
     Rule::unique('main_users', 'phone')->where(function ($query) {
-        return $query->where('status', '!=', '2')
-                     ->where('is_otp_verify', 1)
+        return $query->where('status', '1')
                      ->where('is_guest_user', '0');
     })
 ],
@@ -330,7 +329,11 @@ class UserController extends Controller
         }
 
 
-        // New normal user
+        // New normal user — email OTP only
+        $otp = (string) mt_rand(100000, 999999);
+        $otp_expire_time = Carbon::now()->addMinutes(5)->toDateTimeString();
+        $parts = \Helper::normalizePhoneParts($request->phone ?? '', $request->phone_code ?? '233');
+
         $user = new MainUser;
         $uniqid = uniqid();
         $user->uniqid = $uniqid;
@@ -339,13 +342,13 @@ class UserController extends Controller
         $user->last_name = $request->lastname ?? '';
         $user->email = $request->email ?? '';
         $user->age = $request->age ?? '';
-        $user->phone = $request->phone ?? '';
-        $user->phone_code = $request->phone_code ?? '';
+        $user->phone = $parts['phone'];
+        $user->phone_code = $parts['phone_code'];
         $user->otp = $otp;
         $user->otp_expire_time = $otp_expire_time;
         $user->remember_token = Str::random(60);
         $user->user_type = 1;
-        $user->status = 1;
+        $user->status = 2;
         $user->is_guest_user = 0;
         $user->is_otp_verify = 0;
         $user->password = isset($request->password) ? \Hash::make($request->password) : '';
@@ -354,24 +357,23 @@ class UserController extends Controller
         $url_link = \URL::to("/");
         $url = $url_link . '/';
         $email = $user->email;
-        $name = $user->name ?? ($user->firstname ?? '');
-        $phonecode = $request->phone_code;
-        $otp_phone = $request->phone;
+        $name = $user->first_name ?? '';
         try {
             $ismail = $this->attachment_otp_email($email, $otp, $name, $url, $logo);
         } catch (\Exception $e) {}
         $response = [
-            'otp' => strval(@$user->otp ?: ''),
+            'otp' => '',
             'otp_expire_time' => strval(@$user->otp_expire_time ?: ''),
             'uniqid' => strval(@$user->uniqid ?: ''),
             'remember_token' => strval(@$user->remember_token ?: '')
         ];
         return response()->json([
-            //'code' => 1,
             'success' => 'true',
             'guest_otp' => false,
+            'otp_channel' => 'email',
             'result' => $response,
-            'redirect' => 'login',
+            'redirect' => 'otp',
+            'message' => 'otp_sent_on_email',
         ]);
         // --- End new logic ---
         } catch (\Exception $e) {
@@ -1011,10 +1013,11 @@ class UserController extends Controller
                     $mainResult = $result;
                     return response()->json(new \App\Http\Resources\V1\SettingResource($mainResult));
                 } else {
-                    // Normal user flow
+                    // Normal registration: email OTP verified — mobile remains unverified
                     MainUser::where('uniqid', $userdata->uniqid)->update([
                         'is_verify_user' => 1,
-                        'is_otp_verify' => 1,
+                        'is_otp_verify' => 0,
+                        'status' => 1,
                         'otp' => null,
                         'otp_expire_time' => null,
                         'is_phone' => @$request->device_type,
@@ -1025,6 +1028,8 @@ class UserController extends Controller
                         'otp' => '',
                         'otp_expire_time' => '',
                         'uniqid' => strval(@$userdata->uniqid ?: ''),
+                        'phone_verified' => false,
+                        'email_verified' => true,
                     ];
                     $result['code'] = strval(1);
                     $result['message'] = 'user_register_successfully';

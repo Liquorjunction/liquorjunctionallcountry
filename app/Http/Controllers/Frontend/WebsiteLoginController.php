@@ -422,8 +422,8 @@ class WebsiteLoginController extends Controller
                         'email',
                         Rule::unique('main_users', 'email')
                             ->where(function ($query) {
-                                return $query->where('status', '!=', '2')
-                                    ->where('is_otp_verify', 1)->where('is_guest_user', '0');
+                                return $query->where('status', '1')
+                                    ->where('is_guest_user', '0');
                             }),
                     ],
                     'phone' => [
@@ -431,7 +431,7 @@ class WebsiteLoginController extends Controller
                         'min:8',
                         'max:15',
                         Rule::unique('main_users')->where(function ($query) {
-                            return $query->where('status', '!=', '2')->where('is_otp_verify', 1)->where('is_guest_user', '0');
+                            return $query->where('status', '1')->where('is_guest_user', '0');
                         })
                     ],
                 ];
@@ -540,6 +540,7 @@ class WebsiteLoginController extends Controller
 
                         Helper::sendMobileVerificationOtp($userExist, $phoneCode);
 
+                        \Session::put('otp_channel', 'mobile');
                         \Session::put('otp_phone', $phone);
                         \Session::put('email', $userExist->email ?: ('guest_' . $userExist->id . '@temp.local'));
                         \Session::put('first_name', $userExist->first_name);
@@ -553,31 +554,46 @@ class WebsiteLoginController extends Controller
                         ]);
                     }
 
-                    // Full register converting guest → normal user still needs OTP
+                    // Full register converting guest → normal user: email OTP only
                     $userExist->first_name = $request->first_name;
                     $userExist->last_name = $request->last_name;
                     $userExist->age = $request->age;
                     $userExist->email = $request->email;
-                    $userExist->phone = $request->phone;
-                    $userExist->phone_code = $request->phone_code ?? $userExist->phone_code;
+                    $parts = Helper::normalizePhoneParts($request->phone, $request->phone_code ?? $userExist->phone_code);
+                    $userExist->phone = $parts['phone'];
+                    $userExist->phone_code = $parts['phone_code'];
                     $userExist->is_guest_user = 0;
                     $userExist->is_otp_verify = 0;
                     $userExist->status = 2;
                     if ($request->password) {
                         $userExist->password = Hash::make($request->password);
                     }
+
+                    $otp = (string) mt_rand(100000, 999999);
+                    $otp_expire_time = now()->addMinutes(5)->toDateTimeString();
+                    $userExist->otp = $otp;
+                    $userExist->otp_expire_time = $otp_expire_time;
                     $userExist->save();
 
-                    Helper::sendMobileVerificationOtp($userExist, $userExist->phone_code);
+                    \Session::put('otp_channel', 'email');
                     \Session::put('otp_phone', $userExist->phone);
                     \Session::put('email', $userExist->email);
                     \Session::put('first_name', $userExist->first_name);
                     \Session::put('phone_code', $userExist->phone_code);
                     \Session::put('id', $userExist->id);
 
+                    try {
+                        $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
+                        $url = \URL::to('/') . '/';
+                        $this->attachment_otp_email($userExist->email, $otp, $userExist->first_name, $url, $logo);
+                    } catch (\Exception $e) {
+                        logger()->error('Registration email OTP failed: ' . $e->getMessage());
+                    }
+
                     return response()->json([
                         'success' => 'true',
                         'guest_otp' => false,
+                        'otp_channel' => 'email',
                         'redirect' => route('websitesendotp')
                     ]);
                 } else {
@@ -635,33 +651,29 @@ class WebsiteLoginController extends Controller
 
                     $otpData = Helper::sendMobileVerificationOtp($user, $phoneCode);
 
+                    \Session::put('otp_channel', 'mobile');
                     \Session::put('otp_phone', $phone);
                     \Session::put('email', $email ?: ('guest_' . $user->id . '@temp.local'));
                     \Session::put('first_name', $user->first_name);
                     \Session::put('phone_code', $phoneCode);
                     \Session::put('id', $user->id);
 
-                    if ($email) {
-                        try {
-                            $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
-                            $url = \URL::to('/') . '/';
-                            $this->attachment_otp_email($email, $otpData['otp'], $user->first_name, $url, $logo);
-                        } catch (\Exception $e) {
-                        }
-                    }
-
+                    // Guest continue: mobile OTP
                     return response()->json([
                         'success' => 'true',
                         'guest_otp' => true,
                         'redirect' => route('websitesendotp')
                     ]);
             }
-            \Session::put('otp_phone', $request->phone);
+            // Normal registration: email OTP only (no mobile SMS)
+            $parts = Helper::normalizePhoneParts($request->phone, $request->phone_code);
+            \Session::put('otp_channel', 'email');
+            \Session::put('otp_phone', $parts['phone']);
             \Session::put('email', $request->email);
             \Session::put('first_name', $request->first_name);
-            \Session::put('phone_code', $request->phone_code);
+            \Session::put('phone_code', $parts['phone_code']);
 
-            $otp = mt_rand(1000, 9999);
+            $otp = (string) mt_rand(100000, 999999); // 6-digit email OTP
             $otp_expire_time = now()->addMinutes(5)->toDateTimeString();
 
             $user = new MainUser;
@@ -672,34 +684,35 @@ class WebsiteLoginController extends Controller
             $user->last_name = isset($request->last_name) ? $request->last_name : '';
             $user->email = isset($request->email) ? $request->email : '';
             $user->age = isset($request->age) ? $request->age : '';
-            $user->phone = isset($request->phone) ? $request->phone : '';
-            $user->phone_code = isset($request->phone_code) ? $request->phone_code : '';
+            $user->phone = $parts['phone'];
+            $user->phone_code = $parts['phone_code'];
             $user->otp = $otp;
             $user->otp_expire_time = $otp_expire_time;
             $user->user_type = 1;
             $user->status = 2;
-            $user->is_guest_user = $isGuest ? 1 : 0;
-            if (!$isGuest) {
-                $user->password = isset($request->password) ? Hash::make($request->password) : '';
-            }
+            $user->is_guest_user = 0;
+            $user->is_otp_verify = 0;
+            $user->password = isset($request->password) ? Hash::make($request->password) : '';
             $user->save();
+
+            \Session::put('id', $user->id);
 
             $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
             $url_link = \URL::to("/");
             $url = $url_link . '/';
             $email = $user->email;
-            $name = $user->name ?? ($user->first_name ?? '');
-            $phonecode = $request->phone_code;
-            $otp_phone = $request->phone;
+            $name = $user->first_name ?? '';
             try {
-                $ismail = $this->attachment_otp_email($email, $otp, $name, $url, $logo);
-                $sendsms = \Helper::sendTwilioSMS(
-                    "+" . $phonecode . $otp_phone,
-                    'Dear Customer, Your OTP for login is ' . $otp . ' and it will be valid for 5 Mins - Liquor Junction Ghana.'
-                );
+                $this->attachment_otp_email($email, $otp, $name, $url, $logo);
             } catch (\Exception $e) {
+                logger()->error('Registration email OTP failed: ' . $e->getMessage());
             }
-            return response()->json(['success' => 'true', 'guest_otp' => $isGuest]);
+            return response()->json([
+                'success' => 'true',
+                'guest_otp' => false,
+                'otp_channel' => 'email',
+                'redirect' => route('websitesendotp')
+            ]);
         }
         abort(404);
     }
@@ -743,7 +756,7 @@ class WebsiteLoginController extends Controller
                 \Session::put('email', $data->email);
                 \Session::put('otp_phone', $data->phone);
 
-                if ($data->is_otp_verify != 1) {
+                if ($data->status == 2) {
                     return response()->json([
                         'status' => 'error',
                         'errors' => \Helper::language('otp_verification_pending'),
@@ -757,9 +770,10 @@ class WebsiteLoginController extends Controller
                     return response()->json(array('status' => 'error', 'errors' => \Helper::language('your_account_deactivated_admin_side')), 500);
                 } else {
                     // echo "string";exit();
+                    // Email-verified users can login even if mobile is not verified yet
                     if (
-                        auth()->guard('user')->attempt(['email' => $request->input('email'), 'password' => $request->input('password'), 'status' => 1, 'user_type' => 1, 'is_otp_verify' => 1])
-                        || auth()->guard('user')->attempt(['phone' => $request->input('email'), 'password' => $request->input('password'), 'status' => 1, 'user_type' => 1, 'is_otp_verify' => 1])
+                        auth()->guard('user')->attempt(['email' => $request->input('email'), 'password' => $request->input('password'), 'status' => 1, 'user_type' => 1])
+                        || auth()->guard('user')->attempt(['phone' => $request->input('email'), 'password' => $request->input('password'), 'status' => 1, 'user_type' => 1])
                     ) {
                         $token = $this->generateToken();
                         MainUser::where('id', $id)->update(['web_token' => $token]);
@@ -879,15 +893,19 @@ class WebsiteLoginController extends Controller
         $user_id = $id;
         $otp_phone = Session::get('otp_phone');
         $forgot_email = Session::get('email');
+        $otpChannel = Session::get('otp_channel', 'mobile');
         $users = null;
-        if (!empty($otp_phone)) {
+        if (!empty($id)) {
+            $users = MainUser::find($id);
+        }
+        if (empty($users) && $otpChannel === 'email' && !empty($forgot_email)) {
+            $users = MainUser::where('email', $forgot_email)->latest()->first();
+        }
+        if (empty($users) && !empty($otp_phone)) {
             $users = MainUser::where('phone', $otp_phone)->latest()->first();
         }
         if (empty($users) && !empty($forgot_email)) {
             $users = MainUser::where('email', $forgot_email)->latest()->first();
-        }
-        if (!empty($id) && empty($users)) {
-            $users = MainUser::find($id);
         }
         if (!empty($users)) {
             $datetime1 = new \DateTime();
@@ -895,11 +913,13 @@ class WebsiteLoginController extends Controller
             $interval = $datetime1->diff($datetime2);
             $elapsed = $interval->format('%I:%S');
             $invert = $interval->invert;
-            $displayContact = $otp_phone ?: $forgot_email;
-            return view("frontend.auth.resendotp", compact('forgot_email', 'otp_phone', 'invert', 'elapsed', 'users', 'id', 'user_id', 'displayContact'));
+            $displayContact = ($otpChannel === 'email')
+                ? ($forgot_email ?: $users->email)
+                : ($otp_phone ?: $forgot_email);
+            return view("frontend.auth.resendotp", compact('forgot_email', 'otp_phone', 'invert', 'elapsed', 'users', 'id', 'user_id', 'displayContact', 'otpChannel'));
         }
-        Alert::warning('Warning', 'Please continue as guest again to receive OTP.');
-        return redirect()->route('guest.login');
+        Alert::warning('Warning', 'Please register or continue as guest again to receive OTP.');
+        return redirect()->route('websitelogin');
     }
 
     public function webisteOtpVerification(Request $request)
@@ -913,28 +933,31 @@ class WebsiteLoginController extends Controller
             ($request->digit_6 ?? '')
         );
 
-        $expectedLength = Helper::usesTwilioVerify() ? 6 : 4;
+        $otpChannel = Session::get('otp_channel', 'mobile');
+        $expectedLength = 6;
         if ($otp === '' || strlen($otp) < $expectedLength) {
+            $msg = ($otpChannel === 'email')
+                ? 'Please enter the 6-digit OTP sent to your email.'
+                : 'Please enter the 6-digit OTP sent to your mobile.';
             return response()->json([
                 'status' => 'error_otp',
-                'errors' => Helper::usesTwilioVerify()
-                    ? 'Please enter the 6-digit OTP sent to your mobile.'
-                    : \Helper::language('otp_required')
+                'errors' => $msg
             ], 500);
         }
 
-        $data = $request->all();
-        $userid = $request->user_id;
         $id = Session::get('id');
         $mobile_number = Session::get('otp_phone');
         $email = Session::get('email');
         $phoneCode = Session::get('phone_code') ?: '233';
         $current_time = date('Y-m-d H:i:s');
 
-        // Find pending user first (Twilio Verify does not store OTP in DB)
+        // Find pending user
         $user = null;
         if (!empty($id)) {
             $user = MainUser::find($id);
+        }
+        if (!$user && $otpChannel === 'email' && !empty($email)) {
+            $user = MainUser::where('email', $email)->latest()->first();
         }
         if (!$user && !empty($mobile_number)) {
             $user = MainUser::where('phone', $mobile_number)->latest()->first();
@@ -943,64 +966,64 @@ class WebsiteLoginController extends Controller
             $user = MainUser::where('email', $email)->latest()->first();
         }
 
-        // Legacy local-OTP match fallback
-        if ($user && !Helper::usesTwilioVerify() && (string) $user->otp !== 'VERIFY') {
-            $matched = null;
-            if (!empty($mobile_number)) {
-                $matched = MainUser::where('otp', $otp)->where('phone', $mobile_number)->latest()->first();
-            }
-            if (!$matched && !empty($email)) {
-                $matched = MainUser::where('otp', $otp)->where('email', $email)->latest()->first();
-            }
-            if (!$matched && !empty($id)) {
-                $matched = MainUser::where('otp', $otp)->where('id', $id)->first();
-            }
-            $user = $matched;
-        }
-
         if (!$user) {
             return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_incorrect')), 500);
         }
 
-        if (!Helper::validateMobileOtp($user, $otp, $phoneCode ?: $user->phone_code)) {
+        // Registration: verify local email OTP. Guest/mobile: Twilio Verify / local mobile OTP.
+        $otpValid = false;
+        if ($otpChannel === 'email' || ((string) $user->otp !== 'VERIFY' && !Helper::usesTwilioVerify())) {
+            if ((string) $user->otp !== $otp) {
+                return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_incorrect')), 500);
+            }
+            if (!empty($user->otp_expire_time) && $current_time > $user->otp_expire_time) {
+                return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_expired_msg')), 500);
+            }
+            $otpValid = true;
+        } else {
+            $otpValid = Helper::validateMobileOtp($user, $otp, $phoneCode ?: $user->phone_code);
+        }
+
+        if (!$otpValid) {
             return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_incorrect')), 500);
         }
 
-        if (!Helper::usesTwilioVerify() && (string) $user->otp !== 'VERIFY' && $current_time > $user->otp_expire_time) {
-            return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_expired_msg')), 500);
-        }
-
         try {
-                $updatepsw = MainUser::where('id', $user->id)->update([
-                    'is_otp_verify' => 1,
+                // Email registration verifies email only — mobile stays unverified until profile/checkout OTP
+                $updateData = [
                     'status' => 1,
                     'is_verify_user' => 1,
                     'otp' => null,
                     'otp_expire_time' => null,
-                ]);
-                \DB::enableQueryLog();
-                \DB::getQueryLog();
+                ];
+                if ((int) $user->is_guest_user === 1) {
+                    $updateData['is_otp_verify'] = 1; // guest mobile OTP verified
+                } else {
+                    // Normal register uses email OTP — do not mark mobile verified
+                    $updateData['is_otp_verify'] = 0;
+                }
+
+                $updatepsw = MainUser::where('id', $user->id)->update($updateData);
                 if (!empty($user->email) && strpos($user->email, '@temp.local') === false) {
                     try {
                         $ismail = $this->attachment_register_email($user);
                     } catch (\Exception $e) {
                     }
                 }
+                Session::forget('otp_channel');
                 Alert::success(\Helper::language('success'), __('backend.user_register_successfully'));
                 if ($user->is_guest_user == 1) {
 
                     Auth::guard('user')->login($user);
 
-                    // 🔥 IMPORTANT: Merge session cart into DB (optional but recommended)
                     Helper::afterLoginAddUserCartItemData();
 
-                    // Get updated cart
                     $cartItems = \Helper::getUserCartItems();
 
                     if (count($cartItems) > 0) {
                         return response()->json([
                             'success' => 'true',
-                            'redirect' => route('checkout') // 👈 your checkout route
+                            'redirect' => route('checkout')
                         ]);
                     }
 
@@ -1069,101 +1092,78 @@ class WebsiteLoginController extends Controller
 
     public function websiteResendOtpForm(Request $request)
     {
-        // dd($request->all());
-        // echo "<pre>";print_r($request->toArray());exit();
         $id = Session::get('id');
-        // dd($id);
         $phonecode = Session::get('phone_code');
-        // dd($phonecode);
-        $userdata = MainUser::where('phone_code')->first();
-        // dd($userdata);
         $otp_phone = Session::get('otp_phone');
         $forgot_email = Session::get('forgot_email');
-        // dd($forgot_email);
-        $otp_expire_time = $otpExpireTime = now()->addMinutes(5)->toDateTimeString();
-        $otp = mt_rand(1000, 9999);
+        $otp_expire_time = now()->addMinutes(5)->toDateTimeString();
         $email = Session::get('email');
         $name = Session::get('first_name');
-        // $phonecode=$userdata->phone_code;
+        $otpChannel = Session::get('otp_channel', 'mobile');
 
-        if (!empty($otp_phone)) {
-            // $User = MainUser::where('email', '=', $request->email)->where('status', 2)->latest()->first();
-            // dd($User);
-            // $user=MainUser::where('email','=',$request->email)->where('status',2)->latest()->first();
-            $updatepsw = MainUser::where('phone', $otp_phone)->update(
-                array(
-                    'otp_expire_time' => $otp_expire_time,
-                    'otp' => $otp,
-                )
-            );
-
-            $datetime1 = new \DateTime();
-            $datetime2 = new \DateTime($otp_expire_time);
-            $interval = $datetime1->diff($datetime2);
-            $elapsed = $interval->format('%I:%S');
-            $invert = $interval->invert;
-            // dd($user);
-            // dd($email);
-
-            $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
-            $url_link = \URL::to("/");
-            $url = $url_link . '/';
-            $email = $email;
-            $otp = $otp;
-            $name = $name;
-
-            if (!empty($email) && strpos($email, '@temp.local') === false) {
-                try {
-                    $ismail = $this->attachment_otp_email($email, $otp, $name, $url, $logo);
-                } catch (\Exception $e) {
-                }
+        // Registration email OTP resend
+        if ($otpChannel === 'email') {
+            $otp = (string) mt_rand(100000, 999999);
+            $userQuery = MainUser::query();
+            if (!empty($id)) {
+                $userQuery->where('id', $id);
+            } elseif (!empty($email)) {
+                $userQuery->where('email', $email);
+            } else {
+                return response()->json(['error' => true, 'message' => 'Unable to resend OTP.'], 422);
             }
+            $userQuery->update([
+                'otp_expire_time' => $otp_expire_time,
+                'otp' => $otp,
+            ]);
+
             try {
-                $code = $phonecode ?: '233';
-                \Helper::sendTwilioSMS('+' . $code . $otp_phone, 'Dear Customer, Your OTP for Liquor Junction is ' . $otp . '. Valid for 5 mins.');
+                $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
+                $url = \URL::to('/') . '/';
+                $this->attachment_otp_email($email, $otp, $name, $url, $logo);
             } catch (\Exception $e) {
-                logger()->error('Resend OTP SMS failed: ' . $e->getMessage());
+                logger()->error('Resend email OTP failed: ' . $e->getMessage());
+                return response()->json(['error' => true, 'message' => 'Failed to send email OTP.'], 500);
             }
 
             Alert::success(\Helper::language('success'), __('backend.otp_resend_successfully'));
-            // return redirect()->route('frontend.home');
-            return response()->json(['success' => 'true']);
-        } else {
+            return response()->json(['success' => 'true', 'otp_channel' => 'email']);
+        }
+
+        // Guest / mobile OTP resend via Twilio Verify or SMS
+        if (!empty($id) || !empty($otp_phone)) {
+            $user = !empty($id) ? MainUser::find($id) : MainUser::where('phone', $otp_phone)->latest()->first();
+            if (!$user) {
+                return response()->json(['error' => true, 'message' => 'Unable to resend OTP.'], 422);
+            }
+            $otpData = Helper::sendMobileVerificationOtp($user, $phonecode ?: $user->phone_code);
+            Alert::success(\Helper::language('success'), __('backend.otp_resend_successfully'));
+            return response()->json([
+                'success' => 'true',
+                'otp_channel' => 'mobile',
+                'sms_sent' => !empty($otpData['sms_sent']),
+            ]);
+        }
+
+        if (!empty($forgot_email)) {
+            $otp = (string) mt_rand(100000, 999999);
             $User = MainUser::where('email', '=', $forgot_email)->where('status', 1)->latest()->first();
-            // dd($User);
-            $updatepsw = MainUser::where('email', $forgot_email)->update(
-                array(
-                    'otp_expire_time' => $otp_expire_time,
-                    'otp' => $otp,
-                    'status' => 1,
-                )
-            );
-
-
-
-            $datetime1 = new \DateTime();
-            $datetime2 = new \DateTime($otp_expire_time);
-            $interval = $datetime1->diff($datetime2);
-            $elapsed = $interval->format('%I:%S');
-            $invert = $interval->invert;
+            MainUser::where('email', $forgot_email)->update([
+                'otp_expire_time' => $otp_expire_time,
+                'otp' => $otp,
+                'status' => 1,
+            ]);
 
             $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
-            $url_link = \URL::to("/");
-            $url = $url_link . '/';
-            $email = $User->email;
-            $otp = $otp;
-            $name = $User->first_name;
-            //  dd($logo,$url_link,$url,$email,$otp,$name);
-
-            $ismail = $this->attachment_otp_email($email, $otp, $name, $url, $logo);
-            // dd($updatepsw);
-            // dd($ismail);
+            $url = \URL::to('/') . '/';
+            $email = $User->email ?? $forgot_email;
+            $name = $User->first_name ?? '';
+            $this->attachment_otp_email($email, $otp, $name, $url, $logo);
             Alert::success(\Helper::language('success'), __('backend.otp_resend_successfully'));
-            // return redirect()->route('frontend.home');
             return response()->json(['success' => 'true']);
         }
 
-        // return view("frontEnd.auth.resendotp",compact('otp_phone','invert','elapsed'));
+        return response()->json(['error' => true, 'message' => 'Unable to resend OTP.'], 422);
     }
 
     public function attachment_register_email($user)

@@ -38,6 +38,9 @@
                                 <li>
                                     <span class="title-two text-dark-grey d-block mb-0">{{@Helper::language('email_label')}}</span>
                                     <a href="mailto:{{isset($myProfile->email) ? $myProfile->email :''}}" class="title-two">{{isset($myProfile->email) ? $myProfile->email :''}}</a>
+                                    @if((int)@$myProfile->is_verify_user === 1 || (int)@$myProfile->status === 1)
+                                        <span style="display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;background:#e8f8ef;color:#1b7a3d;font-size:12px;font-weight:600;">Email Verified</span>
+                                    @endif
                                 </li>
                                 <li>
                                     <span class="title-two text-dark-grey d-block mb-0">{{@Helper::language('phone_number')}}</span>
@@ -47,9 +50,9 @@
                                         @endif
                                     </a>
                                     @if((int)@$myProfile->is_otp_verify === 1)
-                                        <span class="phone-verified-badge" style="display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;background:#e8f8ef;color:#1b7a3d;font-size:12px;font-weight:600;">Verified</span>
+                                        <span class="phone-verified-badge" style="display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;background:#e8f8ef;color:#1b7a3d;font-size:12px;font-weight:600;">Mobile Verified</span>
                                     @else
-                                        <span class="phone-unverified-badge" style="display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;background:#fff3e8;color:#b85c00;font-size:12px;font-weight:600;">Not Verified</span>
+                                        <span class="phone-unverified-badge" style="display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;background:#fff3e8;color:#b85c00;font-size:12px;font-weight:600;">Mobile Not Verified</span>
                                         <a href="{{ route('edit-profile') }}" class="border-button d-inline-block mt-2" style="margin-left:0;">Verify Mobile</a>
                                     @endif
                                 </li>
