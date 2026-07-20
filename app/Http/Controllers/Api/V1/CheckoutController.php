@@ -2723,4 +2723,195 @@ class CheckoutController extends Controller
             return response()->json(new \App\Http\Resources\V1\SettingResource($mainResult));
         }
     }
+
+    /**
+     * Complete name/phone before place-order (same as website checkout.completeProfile).
+     */
+    public function completeProfile(Request $request)
+    {
+        $validator = \Validator::make($request->all(), [
+            'uniqid' => 'required',
+            'token' => 'required',
+            'first_name' => 'required|min:3|max:50',
+            'phone' => 'required|min:9|max:15',
+            'phone_code' => 'nullable',
+            'email' => 'nullable|email',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'validation_error',
+                'error' => $validator->messages(),
+                'result' => null,
+            ], 200);
+        }
+
+        $authCheck = \App\Helpers\ResponseHelper::userCheckStatus($request->uniqid, $request->token);
+        if ($authCheck['code'] != 1) {
+            return response()->json(new \App\Http\Resources\V1\SettingResource($authCheck));
+        }
+
+        $user = MainUser::where('uniqid', $request->uniqid)->where('remember_token', $request->token)->first();
+        if (!$user) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'invalid_token',
+                'result' => null,
+            ], 200);
+        }
+
+        $firstName = trim($request->first_name);
+        $parts = \Helper::normalizePhoneParts($request->phone, $request->phone_code ?: ($user->phone_code ?: '233'));
+        $phone = $parts['phone'];
+        $phoneCode = $parts['phone_code'];
+        $email = !empty($request->email) ? trim($request->email) : $user->email;
+
+        if (!\Helper::isValidCustomerName($firstName)) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'invalid_name',
+                'error' => 'Please enter a valid real name.',
+                'result' => null,
+            ], 200);
+        }
+        if (!\Helper::isValidCustomerPhone($phone, $phoneCode)) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'invalid_phone',
+                'error' => 'Please enter a valid mobile number.',
+                'result' => null,
+            ], 200);
+        }
+
+        $phoneOwner = MainUser::where('phone', $phone)
+            ->where('id', '!=', $user->id)
+            ->where('is_otp_verify', 1)
+            ->where('status', '!=', 2)
+            ->first();
+        if ($phoneOwner) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'phone_already_used',
+                'error' => 'This mobile number is already registered with another account.',
+                'result' => null,
+            ], 200);
+        }
+
+        $previousParts = \Helper::normalizePhoneParts($user->phone, $user->phone_code);
+        $previousPhone = $previousParts['phone'];
+        $nameParts = preg_split('/\s+/', $firstName, 2);
+
+        $user->first_name = $nameParts[0] ?? $firstName;
+        $user->last_name = $nameParts[1] ?? ($user->last_name ?: '');
+        $user->phone = $phone;
+        $user->phone_code = $phoneCode;
+        if (!empty($email)) {
+            $user->email = $email;
+        }
+
+        $phoneChanged = $previousPhone !== $phone
+            || (string) ($previousParts['phone_code'] ?? '') !== (string) $phoneCode;
+        $needsOtp = $phoneChanged
+            || (int) $user->is_otp_verify !== 1
+            || !\Helper::isValidCustomerPhone($previousPhone, $previousParts['phone_code'] ?? null);
+
+        if ($needsOtp) {
+            $user->is_otp_verify = 0;
+            $user->save();
+            $otpData = \Helper::sendMobileVerificationOtp($user, $phoneCode);
+            $smsSent = !empty($otpData['sms_sent']);
+
+            return response()->json([
+                'code' => $smsSent ? strval(1) : strval(0),
+                'message' => $smsSent ? 'otp_sent' : 'otp_sms_failed',
+                'needs_otp' => true,
+                'sms_sent' => $smsSent,
+                'otp_channel' => 'mobile',
+                'incomplete_profile' => true,
+                'result' => [
+                    'otp' => '',
+                    'otp_expire_time' => strval($otpData['otp_expire_time'] ?? ''),
+                    'uniqid' => strval($user->uniqid),
+                    'remember_token' => strval($user->remember_token),
+                    'phone' => $phone,
+                    'phone_code' => $phoneCode,
+                    'first_name' => $user->first_name,
+                ],
+            ], 200);
+        }
+
+        $user->save();
+        $status = \Helper::getOrderProfileStatus($user->fresh());
+
+        return response()->json([
+            'code' => strval(1),
+            'message' => 'profile_updated',
+            'needs_otp' => false,
+            'complete' => $status['complete'],
+            'result' => \App\Helpers\ResponseHelper::userCommonResponse($user->fresh()),
+        ], 200);
+    }
+
+    /**
+     * Verify mobile OTP after completeProfile (same as website checkout.verifyProfileOtp).
+     */
+    public function verifyProfileOtp(Request $request)
+    {
+        $validator = \Validator::make($request->all(), [
+            'uniqid' => 'required',
+            'token' => 'required',
+            'otp' => 'required|min:4|max:8',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'validation_error',
+                'error' => $validator->messages(),
+                'result' => null,
+            ], 200);
+        }
+
+        $authCheck = \App\Helpers\ResponseHelper::userCheckStatus($request->uniqid, $request->token);
+        if ($authCheck['code'] != 1) {
+            return response()->json(new \App\Http\Resources\V1\SettingResource($authCheck));
+        }
+
+        $user = MainUser::where('uniqid', $request->uniqid)->where('remember_token', $request->token)->first();
+        if (!$user) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'invalid_token',
+                'result' => null,
+            ], 200);
+        }
+
+        $otp = trim((string) $request->otp);
+        if (!\Helper::validateMobileOtp($user, $otp, $user->phone_code)) {
+            return response()->json([
+                'code' => strval(-8),
+                'message' => 'otp_not_match',
+                'error' => 'Incorrect or expired OTP. Please try again.',
+                'result' => null,
+            ], 200);
+        }
+
+        $user->is_otp_verify = 1;
+        $user->is_verify_user = 1;
+        $user->status = 1;
+        $user->otp = null;
+        $user->otp_expire_time = null;
+        $user->save();
+
+        $status = \Helper::getOrderProfileStatus($user->fresh());
+
+        return response()->json([
+            'code' => strval(1),
+            'message' => 'mobile_verified',
+            'complete' => $status['complete'],
+            'needs_otp' => false,
+            'result' => \App\Helpers\ResponseHelper::userCommonResponse($user->fresh()),
+        ], 200);
+    }
 }

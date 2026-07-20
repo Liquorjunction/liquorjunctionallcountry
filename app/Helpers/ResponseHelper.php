@@ -23,10 +23,13 @@ class ResponseHelper
         $response['email']          = strval(@$userdata->email ?: '');
         $response['phone_number']         = strval(@$userdata->phone ?: '');
         $response['phone_code']         = strval(@$userdata->phone_code ?: '');
-        // $response['status']         = strval(@$userdata->status ?: '0');
+        $response['status']         = strval(@$userdata->status ?: '0');
         $response['otp']            = strval(@$userdata->otp ?: '');
-        // $response['otp_expire_time']      = strval(@$userdata->otp_expire_time ?: '');
-        // $response['is_verify']         = strval(@$userdata->is_verify_user ?: '0');
+        $response['is_verify_user'] = strval((int) (@$userdata->is_verify_user ?: 0));
+        $response['is_otp_verify']  = strval((int) (@$userdata->is_otp_verify ?: 0));
+        $response['email_verified'] = ((int) (@$userdata->is_verify_user ?: 0) === 1 || (int) (@$userdata->status ?: 0) === 1) ? '1' : '0';
+        $response['phone_verified'] = ((int) (@$userdata->is_otp_verify ?: 0) === 1) ? '1' : '0';
+        $response['is_guest_user']  = strval((int) (@$userdata->is_guest_user ?: 0));
         // $response['country']         = strval(@$userdata->country);
         // $response['states']         = strval(@$userdata->states);
         // $response['city']         = strval(@$userdata->city);

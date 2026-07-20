@@ -858,7 +858,15 @@ class UserController extends Controller
 
         $post = $request->all();
         if ($post) {
-            $customerData_detail = MainUser::where('email', $request->email_mobile)->orWhere('phone', $request->email_mobile)->where('status', '!=', 2)->where('is_otp_verify', 1)->latest()->first();
+            // Allow login when account is active (email verified). Mobile may still be unverified (is_otp_verify=0).
+            $customerData_detail = MainUser::where(function ($q) use ($request) {
+                    $q->where('email', $request->email_mobile)
+                        ->orWhere('phone', $request->email_mobile);
+                })
+                ->where('status', '1')
+                ->where('user_type', 1)
+                ->latest()
+                ->first();
             if (!empty($customerData_detail)) {
                 $validate = Hash::check($request->input('password'), $customerData_detail->password);
                 if (!$validate) {
@@ -870,7 +878,7 @@ class UserController extends Controller
                     return response()->json($mainResult);
                 }
 
-                if ($customerData_detail->is_verify_user != 1) {
+                if ($customerData_detail->is_verify_user != 1 && (int) $customerData_detail->status !== 1) {
                     // $response = \App\Helpers\ResponseHelper::userCommonResponse($customerData_detail);
                     $userdata = MainUser::where('id', $customerData_detail->id)->first();
 
@@ -917,11 +925,7 @@ class UserController extends Controller
                         )
                     );
                     $userdata = MainUser::where('id', $customerData_detail->id)->first();
-                    // $response = \App\Helpers\ResponseHelper::userCommonResponse($userdata);
-
-                    $response['email'] = strval(@$userdata->email ?: '');
-                    $response['uniqid'] = strval(@$userdata->uniqid ?: '');
-                    $response['remember_token'] = strval(@$userdata->remember_token ?: '');
+                    $response = \App\Helpers\ResponseHelper::userCommonResponse($userdata);
 
                     $result['code'] = strval(1);
                     $result['message'] = 'success';
@@ -931,6 +935,27 @@ class UserController extends Controller
                     return response()->json(new \App\Http\Resources\V1\SettingResource($mainResult));
                 }
             } else {
+                // Pending email OTP (status=2) — ask app to verify email first
+                $pendingUser = MainUser::where(function ($q) use ($request) {
+                        $q->where('email', $request->email_mobile)
+                            ->orWhere('phone', $request->email_mobile);
+                    })
+                    ->where('status', '2')
+                    ->where('is_guest_user', '0')
+                    ->latest()
+                    ->first();
+                if ($pendingUser && Hash::check($request->input('password'), $pendingUser->password)) {
+                    $result['code'] = strval(-5);
+                    $result['message'] = 'verify_otp_first';
+                    $result['result'] = [
+                        'email' => strval($pendingUser->email ?: ''),
+                        'uniqid' => strval($pendingUser->uniqid ?: ''),
+                        'remember_token' => strval($pendingUser->remember_token ?: ''),
+                        'otp_channel' => 'email',
+                    ];
+                    return response()->json(new \App\Http\Resources\V1\SettingResource($result));
+                }
+
                 $result['code'] = strval(-4);
                 $result['message'] = 'email_or_password_is_incorrect';
                 $result['result'] = [];
@@ -1144,7 +1169,6 @@ class UserController extends Controller
     public function resendOtp(Request $request)
     {
         $result = [];
-        $finalArr = [];
 
         $validator = \Validator::make($request->all(), [
             'uniqid' => 'required',
@@ -1159,70 +1183,60 @@ class UserController extends Controller
             ], 200);
         }
 
-        $response = \App\Helpers\ResponseHelper::userCheckStatus($request->uniqid, $request->token);
-        // echo "<pre>";print_r();exit();
-        if ($response['code'] != 1) {
-            $mainResult = $response;
-            return response()->json(new \App\Http\Resources\V1\SettingResource($mainResult));
-        }
+        // Allow pending (status=2) and active users — do not use userCheckStatus (blocks status=2)
+        $findUser = MainUser::where('uniqid', $request->uniqid)
+            ->where('remember_token', $request->token)
+            ->whereIn('status', [1, 2])
+            ->first();
 
-        $post = $request->all();
-
-        if ($post) {
-            $setting = Setting::find(1);
-            $findUser = MainUser::where('uniqid', $request->uniqid)->where('remember_token', $request->token)->where('status', '!=', 2)->first();
-            $otp = mt_rand(1000, 9999);
-            $otp_expire_time = Carbon::now()->addSeconds(@$setting->otp_expiration_second ?: 300);
-
-
-            if (!empty($findUser) && $findUser != "") {
-
-                $update = MainUser::where('uniqid', $request->uniqid)->update([
-                    "otp" => $otp,
-                    "otp_expire_time" => $otp_expire_time,
-                ]);
-
-                $userdata = MainUser::where('uniqid', $request->uniqid)->where('status', 1)->first();
-                // echo "<pre>";print_r($userdata);exit();
-                //  $response = \App\Helpers\ResponseHelper::userCommonResponse($userdata);
-                $response = [
-                    'otp' => strval(@$userdata->otp ?: ''),
-                    'otp_expire_time' => strval(@$userdata->otp_expire_time ?: ''),
-                    'uniqid' => strval(@$userdata->uniqid ?: ''),
-                ];
-
-                $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
-                $url_link = \URL::to("/");
-                $url = $url_link . '/';
-                $email = $userdata->email;
-                $otp = $otp;
-                $name = $userdata->first_name;
-
-                $ismail = $this->attachment_otp_email($email, $otp, $name, $url, $logo);
-
-                $result['code'] = strval(1);
-                $result['message'] = 'success';
-                $result['result'] = $response;
-
-                $mainResult = $result;
-                return response()->json(new \App\Http\Resources\V1\SettingResource($mainResult));
-            } else {
-                $result['code'] = strval(0);
-                $result['message'] = 'no_data_found';
-                // $result['result']   =  [];
-
-                $mainResult = $result;
-                return response()->json(new \App\Http\Resources\V1\SettingResource($mainResult));
-            }
-        } else {
-
+        if (empty($findUser)) {
             $result['code'] = strval(0);
-            $result['message'] = 'something_went_wrong';
-            $result['result'] = [];
-
-            $mainResult = $result;
-            return response()->json(new \App\Http\Resources\V1\SettingResource($mainResult));
+            $result['message'] = 'no_data_found';
+            return response()->json(new \App\Http\Resources\V1\SettingResource($result));
         }
+
+        // Guest / mobile OTP channel
+        if ((int) $findUser->is_guest_user === 1 || (string) $findUser->otp === 'VERIFY' || $request->input('otp_channel') === 'mobile') {
+            $otpData = \Helper::sendMobileVerificationOtp($findUser, $findUser->phone_code);
+            $smsSent = !empty($otpData['sms_sent']);
+            $result['code'] = $smsSent ? strval(1) : strval(0);
+            $result['message'] = $smsSent ? 'otp_sent' : 'otp_sms_failed';
+            $result['otp_channel'] = 'mobile';
+            $result['sms_sent'] = $smsSent;
+            $result['result'] = [
+                'otp' => '',
+                'otp_expire_time' => strval($otpData['otp_expire_time'] ?? ''),
+                'uniqid' => strval($findUser->uniqid),
+                'remember_token' => strval($findUser->remember_token),
+            ];
+            return response()->json(new \App\Http\Resources\V1\SettingResource($result));
+        }
+
+        // Email OTP (normal registration)
+        $otp = (string) mt_rand(100000, 999999);
+        $otp_expire_time = Carbon::now()->addMinutes(5)->toDateTimeString();
+        MainUser::where('id', $findUser->id)->update([
+            'otp' => $otp,
+            'otp_expire_time' => $otp_expire_time,
+        ]);
+
+        $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
+        $url = \URL::to('/') . '/';
+        try {
+            $this->attachment_otp_email($findUser->email, $otp, $findUser->first_name, $url, $logo);
+        } catch (\Exception $e) {
+        }
+
+        $result['code'] = strval(1);
+        $result['message'] = 'otp_sent_on_email';
+        $result['otp_channel'] = 'email';
+        $result['result'] = [
+            'otp' => '',
+            'otp_expire_time' => strval($otp_expire_time),
+            'uniqid' => strval($findUser->uniqid),
+            'remember_token' => strval($findUser->remember_token),
+        ];
+        return response()->json(new \App\Http\Resources\V1\SettingResource($result));
     }
 
     public function resendforgotOtp(Request $request)
@@ -1738,25 +1752,38 @@ class UserController extends Controller
                     'data' => null
                 ], 200);
             }
-            $updatepsw = MainUser::where('id', $userData->id)->update(
-                array(
-                    'first_name' => @$request->first_name,
-                    'last_name' => @$request->last_name,
-                    'email' => @$request->email,
-                    'phone' => @$request->phone,
-                    'street_address' => @$request->address,
-                    'states' => @$request->state,
-                    'country' => @$request->country,
-                    'post_code' => @$request->zip_code,
-                    'city' => @$request->city,
-                    'phone_code' => @$request->phone_code,
-                )
-            );
 
+            $parts = \Helper::normalizePhoneParts($request->phone ?? $userData->phone, $request->phone_code ?? ($userData->phone_code ?: '233'));
+            $newPhone = $parts['phone'];
+            $newPhoneCode = $parts['phone_code'];
+            $prevParts = \Helper::normalizePhoneParts($userData->phone ?? '', $userData->phone_code ?? '233');
+            $phoneChanged = $prevParts['phone'] !== $newPhone
+                || (string) ($prevParts['phone_code'] ?? '') !== (string) $newPhoneCode;
 
+            $updateData = [
+                'first_name' => @$request->first_name,
+                'last_name' => @$request->last_name,
+                'email' => @$request->email,
+                'phone' => $newPhone,
+                'street_address' => @$request->address,
+                'states' => @$request->state,
+                'country' => @$request->country,
+                'post_code' => @$request->zip_code,
+                'city' => @$request->city,
+                'phone_code' => $newPhoneCode,
+            ];
+            if ($phoneChanged) {
+                $updateData['is_otp_verify'] = 0;
+            }
+
+            $updatepsw = MainUser::where('id', $userData->id)->update($updateData);
+
+            $userdata = MainUser::where('id', $userData->id)->first();
             $result['code'] = strval(1);
             $result['message'] = 'success';
-            // $result['result']       = [];
+            $result['phone_changed'] = $phoneChanged;
+            $result['needs_otp'] = $phoneChanged || (int) $userdata->is_otp_verify !== 1;
+            $result['result'] = \App\Helpers\ResponseHelper::userCommonResponse($userdata);
 
             $mainResult = $result;
             return response()->json(new \App\Http\Resources\V1\SettingResource($mainResult));
@@ -1768,6 +1795,156 @@ class UserController extends Controller
             $mainResult = $result;
             return response()->json(new \App\Http\Resources\V1\SettingResource($mainResult));
         }
+    }
+
+    /**
+     * Send mobile OTP for profile verify (same as website profile.sendPhoneOtp).
+     */
+    public function sendPhoneOtp(Request $request)
+    {
+        $validator = \Validator::make($request->all(), [
+            'uniqid' => 'required',
+            'token' => 'required',
+            'phone' => 'nullable',
+            'phone_code' => 'nullable',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'validation_error',
+                'error' => $validator->messages(),
+                'result' => null,
+            ], 200);
+        }
+
+        $authCheck = \App\Helpers\ResponseHelper::userCheckStatus($request->uniqid, $request->token);
+        if ($authCheck['code'] != 1) {
+            return response()->json(new \App\Http\Resources\V1\SettingResource($authCheck));
+        }
+
+        $user = MainUser::where('uniqid', $request->uniqid)->where('remember_token', $request->token)->first();
+        if (!$user) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'invalid_token',
+                'result' => null,
+            ], 200);
+        }
+
+        $parts = \Helper::normalizePhoneParts($request->phone ?: $user->phone, $request->phone_code ?: ($user->phone_code ?: '233'));
+        $phone = $parts['phone'];
+        $phoneCode = $parts['phone_code'];
+
+        if (!\Helper::isValidCustomerPhone($phone, $phoneCode)) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'invalid_phone',
+                'error' => 'Please enter a valid mobile number first.',
+                'result' => null,
+            ], 200);
+        }
+
+        $phoneOwner = MainUser::where('phone', $phone)
+            ->where('id', '!=', $user->id)
+            ->where('is_otp_verify', 1)
+            ->where('status', '!=', 2)
+            ->first();
+        if ($phoneOwner) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'phone_already_used',
+                'error' => 'This mobile number is already verified with another account.',
+                'result' => null,
+            ], 200);
+        }
+
+        $user->phone = $phone;
+        $user->phone_code = $phoneCode;
+        $user->is_otp_verify = 0;
+        $user->save();
+
+        $otpData = \Helper::sendMobileVerificationOtp($user, $phoneCode);
+        $smsSent = !empty($otpData['sms_sent']);
+
+        return response()->json([
+            'code' => $smsSent ? strval(1) : strval(0),
+            'message' => $smsSent ? 'otp_sent' : 'otp_sms_failed',
+            'sms_sent' => $smsSent,
+            'needs_otp' => true,
+            'otp_channel' => 'mobile',
+            'result' => [
+                'otp' => '', // never return real OTP to client when Twilio Verify
+                'otp_expire_time' => strval($otpData['otp_expire_time'] ?? ''),
+                'uniqid' => strval($user->uniqid),
+                'remember_token' => strval($user->remember_token),
+                'phone' => $phone,
+                'phone_code' => $phoneCode,
+                'phone_verified' => false,
+            ],
+        ], 200);
+    }
+
+    /**
+     * Verify mobile OTP for profile (same as website profile.verifyPhoneOtp).
+     */
+    public function verifyPhoneOtp(Request $request)
+    {
+        $validator = \Validator::make($request->all(), [
+            'uniqid' => 'required',
+            'token' => 'required',
+            'otp' => 'required|min:4|max:8',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'validation_error',
+                'error' => $validator->messages(),
+                'result' => null,
+            ], 200);
+        }
+
+        $authCheck = \App\Helpers\ResponseHelper::userCheckStatus($request->uniqid, $request->token);
+        if ($authCheck['code'] != 1) {
+            return response()->json(new \App\Http\Resources\V1\SettingResource($authCheck));
+        }
+
+        $user = MainUser::where('uniqid', $request->uniqid)->where('remember_token', $request->token)->first();
+        if (!$user) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'invalid_token',
+                'result' => null,
+            ], 200);
+        }
+
+        $otp = trim((string) $request->otp);
+        if (!\Helper::validateMobileOtp($user, $otp, $user->phone_code)) {
+            return response()->json([
+                'code' => strval(-8),
+                'message' => 'otp_not_match',
+                'error' => 'Incorrect or expired OTP. Please try again.',
+                'result' => null,
+            ], 200);
+        }
+
+        $user->is_otp_verify = 1;
+        $user->is_verify_user = 1;
+        $user->status = 1;
+        $user->otp = null;
+        $user->otp_expire_time = null;
+        $user->save();
+
+        $status = \Helper::getOrderProfileStatus($user->fresh());
+
+        return response()->json([
+            'code' => strval(1),
+            'message' => 'mobile_verified',
+            'complete' => $status['complete'],
+            'needs_otp' => false,
+            'result' => \App\Helpers\ResponseHelper::userCommonResponse($user->fresh()),
+        ], 200);
     }
 
     public function contactUs(Request $request)

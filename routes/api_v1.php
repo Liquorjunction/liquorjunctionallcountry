@@ -93,6 +93,8 @@ Route::group(['middleware' => 'headerauthwithoutlogin'], function () {
 
     Route::post('removeAllFav', 'ProductController@removeAllFav');
     Route::post('place-order', 'CheckoutController@placeOrder');
+    Route::post('completeProfile', 'CheckoutController@completeProfile');
+    Route::post('verifyProfileOtp', 'CheckoutController@verifyProfileOtp');
     Route::post('callBackUrl', 'CheckoutController@callBackUrl');
     Route::post('orderSuccessfully', 'CartController@orderSuccessfully');
 
@@ -139,6 +141,8 @@ Route::group(['middleware' => 'headerauthwithoutlogin'], function () {
 
 
     Route::post('changePassword', 'UserController@changePassword');
+    Route::post('sendPhoneOtp', 'UserController@sendPhoneOtp');
+    Route::post('verifyPhoneOtp', 'UserController@verifyPhoneOtp');
     Route::post('logout', 'UserController@logout');
 
     // Invoice
