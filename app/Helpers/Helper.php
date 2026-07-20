@@ -2058,37 +2058,257 @@ if (!empty($sessionCart)) {
 
     static function sendTwilioSMS($to, $message)
     {
-    //     $twilioSid = env("TWILIO_SID", "ACf505d22fa81a0d17c5f4fa66e146e9bc");
-    //     $twilioAuthToken = env("TWILIO_AUTH_TOKEN", "aace0a4621316293018ff527adda9a96");
-    //     $twilioPhoneNumber = env("TWILIO_PHONE_NUMBER", "+16562231114");
-    $twilioSid = env("TWILIO_SID");
-    $twilioAuthToken = env("TWILIO_AUTH_TOKEN");
-    $twilioPhoneNumber = env("TWILIO_PHONE_NUMBER");
+        $twilioSid = env('TWILIO_SID');
+        $twilioAuthToken = env('TWILIO_AUTH_TOKEN');
+        // Prefer phone number from env; fallback to alphanumeric sender if configured
+        $twilioFrom = env('TWILIO_PHONE_NUMBER') ?: env('TWILIO_ALPHA_SENDER', 'LJ-Ghana');
+
+        if (empty($twilioSid) || empty($twilioAuthToken)) {
+            logger()->error('Twilio SMS skipped: TWILIO_SID or TWILIO_AUTH_TOKEN missing in .env');
+            throw new \RuntimeException('Twilio credentials missing');
+        }
+
+        logger()->info('Twilio SMS attempt', [
+            'to' => $to,
+            'from' => $twilioFrom,
+            'sid_prefix' => substr($twilioSid, 0, 6) . '...',
+        ]);
 
         $client = new Client();
 
         $response = $client->post(
-            // "https://api.twilio.com/2010-04-01/Accounts/{$twilioSid}/Messages.json",
-            'https://api.twilio.com/2010-04-01/Accounts/ACf505d22fa81a0d17c5f4fa66e146e9bc/Messages.json',
+            "https://api.twilio.com/2010-04-01/Accounts/{$twilioSid}/Messages.json",
             [
                 'auth' => [$twilioSid, $twilioAuthToken],
                 'form_params' => [
-                    'From' => 'LJ-Ghana',
+                    'From' => $twilioFrom,
                     'To' => $to,
                     'Body' => $message,
                 ],
+                'http_errors' => false,
             ]
         );
 
+        $statusCode = $response->getStatusCode();
         $responseData = json_decode($response->getBody(), true);
-       // dd($responseData);
-        // You can log or handle the response data as needed
-        // For example, log the Twilio SID or check for errors
 
-        // You may also want to add error handling here
-        // Check $responseData['status'] or other Twilio response fields
+        if ($statusCode >= 400 || empty($responseData['sid'])) {
+            logger()->error('Twilio SMS failed', [
+                'http_status' => $statusCode,
+                'to' => $to,
+                'from' => $twilioFrom,
+                'twilio_code' => $responseData['code'] ?? null,
+                'twilio_message' => $responseData['message'] ?? null,
+                'more_info' => $responseData['more_info'] ?? null,
+            ]);
+            throw new \RuntimeException(
+                'Twilio error ' . ($responseData['code'] ?? $statusCode) . ': ' . ($responseData['message'] ?? 'Unknown error')
+            );
+        }
 
-        return $responseData['sid']; // Return Twilio SID for reference
+        logger()->info('Twilio SMS sent', [
+            'to' => $to,
+            'sid' => $responseData['sid'],
+            'status' => $responseData['status'] ?? null,
+        ]);
+
+        return $responseData['sid'];
+    }
+
+    /**
+     * Whether Twilio Verify Service is configured (no TWILIO_PHONE_NUMBER needed).
+     */
+    static function usesTwilioVerify()
+    {
+        return !empty(env('TWILIO_VERIFY_SERVICE_SID'));
+    }
+
+    /**
+     * Split messy stored phones into phone_code + local number.
+     * Handles cases where phone already includes country code (e.g. 233244..., +91..., 0244...).
+     *
+     * @return array{phone_code:string,phone:string,e164:string}
+     */
+    static function normalizePhoneParts($phone, $phoneCode = null)
+    {
+        $raw = trim((string) $phone);
+        $digits = preg_replace('/\D+/', '', $raw);
+        $code = ltrim((string) ($phoneCode ?: ''), '+');
+
+        // Prefer explicit code from DB/request when present
+        $candidateCodes = [];
+        if ($code !== '') {
+            $candidateCodes[] = $code;
+        }
+        // Common codes used in this project
+        foreach (['233', '234', '91', '44', '1', '971', '27'] as $c) {
+            if (!in_array($c, $candidateCodes, true)) {
+                $candidateCodes[] = $c;
+            }
+        }
+
+        $local = $digits;
+        $resolvedCode = $code !== '' ? $code : '233';
+
+        // If phone starts with country code, strip it
+        foreach ($candidateCodes as $c) {
+            if ($c !== '' && str_starts_with($digits, $c) && strlen($digits) > strlen($c) + 6) {
+                $local = substr($digits, strlen($c));
+                $resolvedCode = $c;
+                break;
+            }
+        }
+
+        // Local Ghana/India style leading 0
+        if (str_starts_with($local, '0')) {
+            $local = ltrim($local, '0');
+        }
+
+        // If still empty after stripping, fall back to original digits
+        if ($local === '' && $digits !== '') {
+            $local = ltrim($digits, '0');
+        }
+
+        if ($resolvedCode === '') {
+            $resolvedCode = '233';
+        }
+
+        return [
+            'phone_code' => $resolvedCode,
+            'phone' => $local,
+            'e164' => '+' . $resolvedCode . $local,
+        ];
+    }
+
+    /**
+     * Build E.164 phone like +233244123456 (safe against double country codes).
+     */
+    static function formatE164Phone($phone, $phoneCode = null)
+    {
+        $parts = self::normalizePhoneParts($phone, $phoneCode);
+        return $parts['e164'];
+    }
+
+    /**
+     * Send OTP via Twilio Verify API (does not require TWILIO_PHONE_NUMBER).
+     */
+    static function sendTwilioVerifyOtp($to)
+    {
+        $twilioSid = env('TWILIO_SID');
+        $twilioAuthToken = env('TWILIO_AUTH_TOKEN');
+        $serviceSid = env('TWILIO_VERIFY_SERVICE_SID');
+
+        if (empty($twilioSid) || empty($twilioAuthToken) || empty($serviceSid)) {
+            throw new \RuntimeException('Twilio Verify credentials missing (SID, AUTH_TOKEN, VERIFY_SERVICE_SID)');
+        }
+
+        logger()->info('Twilio Verify OTP attempt', [
+            'to' => $to,
+            'service' => substr($serviceSid, 0, 6) . '...',
+        ]);
+
+        $client = new Client();
+        $response = $client->post(
+            "https://verify.twilio.com/v2/Services/{$serviceSid}/Verifications",
+            [
+                'auth' => [$twilioSid, $twilioAuthToken],
+                'form_params' => [
+                    'To' => $to,
+                    'Channel' => 'sms',
+                ],
+                'http_errors' => false,
+            ]
+        );
+
+        $statusCode = $response->getStatusCode();
+        $responseData = json_decode($response->getBody(), true);
+
+        if ($statusCode >= 400 || empty($responseData['sid'])) {
+            logger()->error('Twilio Verify send failed', [
+                'http_status' => $statusCode,
+                'to' => $to,
+                'twilio_code' => $responseData['code'] ?? null,
+                'twilio_message' => $responseData['message'] ?? null,
+                'more_info' => $responseData['more_info'] ?? null,
+            ]);
+            throw new \RuntimeException(
+                'Twilio Verify error ' . ($responseData['code'] ?? $statusCode) . ': ' . ($responseData['message'] ?? 'Unknown error')
+            );
+        }
+
+        logger()->info('Twilio Verify OTP sent', [
+            'to' => $to,
+            'sid' => $responseData['sid'],
+            'status' => $responseData['status'] ?? null,
+        ]);
+
+        return $responseData;
+    }
+
+    /**
+     * Check OTP via Twilio Verify API.
+     */
+    static function checkTwilioVerifyOtp($to, $code)
+    {
+        $twilioSid = env('TWILIO_SID');
+        $twilioAuthToken = env('TWILIO_AUTH_TOKEN');
+        $serviceSid = env('TWILIO_VERIFY_SERVICE_SID');
+
+        if (empty($twilioSid) || empty($twilioAuthToken) || empty($serviceSid)) {
+            return false;
+        }
+
+        $client = new Client();
+        $response = $client->post(
+            "https://verify.twilio.com/v2/Services/{$serviceSid}/VerificationCheck",
+            [
+                'auth' => [$twilioSid, $twilioAuthToken],
+                'form_params' => [
+                    'To' => $to,
+                    'Code' => $code,
+                ],
+                'http_errors' => false,
+            ]
+        );
+
+        $statusCode = $response->getStatusCode();
+        $responseData = json_decode($response->getBody(), true);
+
+        logger()->info('Twilio Verify check', [
+            'to' => $to,
+            'http_status' => $statusCode,
+            'status' => $responseData['status'] ?? null,
+            'twilio_code' => $responseData['code'] ?? null,
+            'twilio_message' => $responseData['message'] ?? null,
+        ]);
+
+        return ($statusCode < 400) && (($responseData['status'] ?? '') === 'approved');
+    }
+
+    /**
+     * Validate a user OTP (Twilio Verify when configured, else local DB otp).
+     */
+    static function validateMobileOtp($user, $otp, $phoneCode = null)
+    {
+        $otp = trim((string) $otp);
+        if ($otp === '') {
+            return false;
+        }
+
+        $useVerify = self::usesTwilioVerify() || ((string) ($user->otp ?? '') === 'VERIFY');
+        if ($useVerify) {
+            $to = self::formatE164Phone($user->phone, $phoneCode ?: ($user->phone_code ?? '233'));
+            return self::checkTwilioVerifyOtp($to, $otp);
+        }
+
+        if ((string) ($user->otp ?? '') !== $otp) {
+            return false;
+        }
+        if (!empty($user->otp_expire_time) && now()->greaterThan($user->otp_expire_time)) {
+            return false;
+        }
+
+        return true;
     }
 
     static function getOrderStatus($id)
@@ -2489,5 +2709,236 @@ if (!empty($sessionCart)) {
         $xmlPayload = '<?xml version="1.0" encoding="utf-8"?><API3G><CompanyToken>4CF16A78-27EA-47A7-B1D4-6E52343C8DC1</CompanyToken><Request>verifyToken</Request><TransactionToken>' . $token . '</TransactionToken></API3G>';
 
         return $xmlPayload;
+    }
+
+    /**
+     * Reject obviously fake customer names used in spam/fake orders.
+     */
+    static function isValidCustomerName($name)
+    {
+        $name = trim(preg_replace('/\s+/', ' ', (string) $name));
+        if (strlen($name) < 3 || strlen($name) > 50) {
+            return false;
+        }
+        if (!preg_match('/[a-zA-Z]/', $name)) {
+            return false;
+        }
+        if (!preg_match("/^[a-zA-Z\s\-'\.]+$/u", $name)) {
+            return false;
+        }
+
+        $compact = strtolower(preg_replace('/[\s\-\'\.]+/', '', $name));
+        if ($compact === '' || preg_match('/^(.)\1{2,}$/', $compact)) {
+            return false;
+        }
+
+        $counts = count_chars($compact, 1);
+        $maxRepeat = $counts ? max($counts) : 0;
+        if (strlen($compact) >= 5 && ($maxRepeat / strlen($compact)) >= 0.7) {
+            return false;
+        }
+
+        // Reject words with long repeated characters (e.g. assssss)
+        foreach (preg_split('/\s+/', $name) as $word) {
+            $word = strtolower(preg_replace("/[\-'\.]+/", '', $word));
+            if ($word !== '' && preg_match('/(.)\1{3,}/', $word)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Reject obviously fake / placeholder phone numbers.
+     * Accepts local number or number that already includes country code.
+     */
+    static function isValidCustomerPhone($phone, $phoneCode = null)
+    {
+        $parts = self::normalizePhoneParts($phone, $phoneCode);
+        $local = $parts['phone'];
+
+        if (strlen($local) < 8 || strlen($local) > 12) {
+            return false;
+        }
+        if (preg_match('/^(\d)\1+$/', $local)) {
+            return false;
+        }
+
+        $sequential = [
+            '0123456789', '1234567890', '2345678901', '9876543210',
+            '0987654321', '1111111111', '0000000000', '5555555555',
+        ];
+        foreach ($sequential as $pattern) {
+            if (strpos($local, $pattern) !== false) {
+                return false;
+            }
+        }
+
+        $counts = count_chars($local, 1);
+        $maxRepeat = $counts ? max($counts) : 0;
+        if (($maxRepeat / strlen($local)) >= 0.7) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Check whether a user can place an order (verified + usable profile).
+     *
+     * @param  object|array|null  $user
+     * @return array{complete:bool,needs_otp:bool,message:string,first_name:string,phone:string,email:string,phone_code:string}
+     */
+    static function getOrderProfileStatus($user)
+    {
+        $firstName = trim((string) ($user->first_name ?? $user->name ?? ''));
+        $email = trim((string) ($user->email ?? ''));
+        $parts = self::normalizePhoneParts($user->phone ?? '', $user->phone_code ?? '233');
+        $phone = $parts['phone'];
+        $phoneCode = $parts['phone_code'];
+        $isOtpVerify = (int) ($user->is_otp_verify ?? 0) === 1;
+
+        $nameOk = self::isValidCustomerName($firstName);
+        $phoneOk = self::isValidCustomerPhone($user->phone ?? '', $user->phone_code ?? $phoneCode);
+
+        if (!$nameOk && !$phoneOk) {
+            return [
+                'complete' => false,
+                'needs_otp' => true,
+                'message' => 'Please complete your name and verify a valid mobile number before placing an order.',
+                'first_name' => $firstName,
+                'phone' => $phone,
+                'email' => $email,
+                'phone_code' => $phoneCode,
+            ];
+        }
+
+        if (!$nameOk) {
+            return [
+                'complete' => false,
+                'needs_otp' => !$isOtpVerify || !$phoneOk,
+                'message' => 'Please enter a valid full name before placing an order.',
+                'first_name' => $firstName,
+                'phone' => $phone,
+                'email' => $email,
+                'phone_code' => $phoneCode,
+            ];
+        }
+
+        if (!$phoneOk) {
+            return [
+                'complete' => false,
+                'needs_otp' => true,
+                'message' => 'Please enter a valid mobile number and verify OTP before placing an order.',
+                'first_name' => $firstName,
+                'phone' => $phone,
+                'email' => $email,
+                'phone_code' => $phoneCode,
+            ];
+        }
+
+        if (!$isOtpVerify) {
+            return [
+                'complete' => false,
+                'needs_otp' => true,
+                'message' => 'Please verify your mobile number with OTP before placing an order.',
+                'first_name' => $firstName,
+                'phone' => $phone,
+                'email' => $email,
+                'phone_code' => $phoneCode,
+            ];
+        }
+
+        return [
+            'complete' => true,
+            'needs_otp' => false,
+            'message' => '',
+            'first_name' => $firstName,
+            'phone' => $phone,
+            'email' => $email,
+            'phone_code' => $phoneCode,
+        ];
+    }
+
+    /**
+     * Generate OTP, save on user, and send via Twilio Verify (preferred) or SMS Messages API.
+     */
+    static function sendMobileVerificationOtp($user, $phoneCode = null)
+    {
+        $otpExpireTime = now()->addMinutes(5)->toDateTimeString();
+        $parts = self::normalizePhoneParts($user->phone ?? '', $phoneCode ?: ($user->phone_code ?? '233'));
+        $phone = $parts['phone'];
+        $code = $parts['phone_code'];
+        $to = $parts['e164'];
+
+        $useVerify = self::usesTwilioVerify();
+        // When using Verify, Twilio owns the code — mark locally as VERIFY
+        $otp = $useVerify ? 'VERIFY' : (string) mt_rand(1000, 9999);
+
+        // Keep DB consistent: store local phone + code separately
+        MainUser::where('id', $user->id)->update([
+            'otp' => $otp,
+            'otp_expire_time' => $otpExpireTime,
+            'is_otp_verify' => 0,
+            'phone' => $phone,
+            'phone_code' => $code,
+        ]);
+
+        $smsSent = false;
+        $emailSent = false;
+
+        try {
+            if (empty($phone) || empty($code)) {
+                logger()->error('OTP SMS skipped: missing phone or phone_code', [
+                    'user_id' => $user->id,
+                    'phone' => $phone,
+                    'phone_code' => $code,
+                ]);
+            } elseif ($useVerify) {
+                logger()->info('Sending mobile OTP via Twilio Verify', [
+                    'user_id' => $user->id,
+                    'to' => $to,
+                ]);
+                self::sendTwilioVerifyOtp($to);
+                $smsSent = true;
+            } else {
+                logger()->info('Sending mobile OTP via Twilio Messages', [
+                    'user_id' => $user->id,
+                    'to' => $to,
+                ]);
+                self::sendTwilioSMS(
+                    $to,
+                    'Dear Customer, Your OTP for Liquor Junction is ' . $otp . '. Valid for 5 mins.'
+                );
+                $smsSent = true;
+            }
+        } catch (\Exception $e) {
+            logger()->error('OTP SMS failed: ' . $e->getMessage(), [
+                'user_id' => $user->id,
+                'phone' => $phone,
+                'phone_code' => $code,
+                'mode' => $useVerify ? 'verify' : 'messages',
+            ]);
+        }
+
+        logger()->info('OTP generated for user', [
+            'user_id' => $user->id,
+            'otp_expire_time' => $otpExpireTime,
+            'sms_sent' => $smsSent,
+            'mode' => $useVerify ? 'verify' : 'messages',
+            'to' => $to,
+        ]);
+
+        return [
+            'otp' => $useVerify ? '' : $otp,
+            'otp_expire_time' => $otpExpireTime,
+            'sms_sent' => $smsSent,
+            'email_sent' => $emailSent,
+            'mode' => $useVerify ? 'verify' : 'messages',
+            'to' => $to,
+            'phone' => $phone,
+            'phone_code' => $code,
+        ];
     }
 }

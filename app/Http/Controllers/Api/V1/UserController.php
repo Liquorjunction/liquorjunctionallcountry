@@ -81,6 +81,9 @@ class UserController extends Controller
         if ($isGuest) {
             $rules = [
                 'name' => ['required', 'min:3', 'max:30'],
+                'phone' => ['required', 'min:9', 'max:15'],
+                'email' => ['nullable', 'email'],
+                'phone_code' => ['nullable'],
             ];
         } else {
             $rules = [
@@ -141,20 +144,24 @@ class UserController extends Controller
         // User existence check
         $userExist = null;
         if ($isGuest) {
-            $value = trim($request->email);
-            $email = null;
-            $phone = null;
-            if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
-                $email = $value;
-            } elseif (preg_match('/^[0-9]{8,15}$/', $value)) {
-                $phone = $value;
+            $guestName = trim((string) $request->name);
+            $phone = preg_replace('/\D+/', '', (string) ($request->phone ?: $request->email));
+            $email = !empty($request->email) && filter_var($request->email, FILTER_VALIDATE_EMAIL)
+                ? trim($request->email)
+                : null;
+            $phoneCode = $request->phone_code ?: '233';
+
+            if (!\Helper::isValidCustomerName($guestName)) {
+                return response()->json(['name' => ['Please enter a valid real name.']], 422);
             }
+            if (!\Helper::isValidCustomerPhone($phone)) {
+                return response()->json(['phone' => ['Please enter a valid mobile number.']], 422);
+            }
+
             $userExist = MainUser::where(function ($query) use ($email, $phone) {
+                $query->where('phone', $phone);
                 if ($email) {
-                    $query->where('email', $email);
-                }
-                if ($phone) {
-                    $query->orWhere('phone', $phone);
+                    $query->orWhere('email', $email);
                 }
             })->first();
         } else {
@@ -170,137 +177,116 @@ class UserController extends Controller
 
         if ($userExist) {
             if ($userExist->is_guest_user == 1) {
-                    $productVariants = json_decode($request->product_variants, true);
-            if (!empty($productVariants)) {
-
-                foreach ($productVariants as $productId => $variants) {
-                    foreach ($variants as $variantId => $qty) {
-
-                        $variant = ProductVariants::find($variantId);
-                        if (!$variant) continue;
- 
-                        $price = $variant->variant_discounted_price ?: $variant->variant_price;
-
-                        Cart::updateOrCreate(
-                            [
-                                'user_id' => $userExist->id,
-                                'product_id' => $productId,
-                                'product_variant_id' => $variantId,
-                            ],
-                            [
-                                'quantity' => $qty,
-                                'product_price' => $variant->variant_price,
-                                'offer_price' => $variant->variant_discounted_price,
-                                'total_price' => $price * $qty,
-                                'status' => 1,
-                                'order_type' => 1,
-                            ]
-                        );
+                $productVariants = json_decode($request->product_variants, true);
+                if (!empty($productVariants)) {
+                    foreach ($productVariants as $productId => $variants) {
+                        foreach ($variants as $variantId => $qty) {
+                            $variant = ProductVariants::find($variantId);
+                            if (!$variant) continue;
+                            $price = $variant->variant_discounted_price ?: $variant->variant_price;
+                            Cart::updateOrCreate(
+                                [
+                                    'user_id' => $userExist->id,
+                                    'product_id' => $productId,
+                                    'product_variant_id' => $variantId,
+                                ],
+                                [
+                                    'quantity' => $qty,
+                                    'product_price' => $variant->variant_price,
+                                    'offer_price' => $variant->variant_discounted_price,
+                                    'total_price' => $price * $qty,
+                                    'status' => 1,
+                                    'order_type' => 1,
+                                ]
+                            );
+                        }
                     }
                 }
-            }
-                Helper::afterLoginAddUserCartItemData();
-                // Already verified → direct login
-                if ($isGuest && $userExist->is_otp_verify == 1) {
-                    $response = [
-                        'otp' => '',
-                        'otp_expire_time' => '',
-                        'uniqid' => strval(@$userExist->uniqid ?: ''),
-                        'remember_token' => strval(@$userExist->remember_token ?: '')
-                    ];
+
+                if ($isGuest) {
+                    $phone = preg_replace('/\D+/', '', (string) ($request->phone ?: $request->email));
+                    $phoneCode = $request->phone_code ?: ($userExist->phone_code ?: '233');
+                    $email = !empty($request->email) && filter_var($request->email, FILTER_VALIDATE_EMAIL)
+                        ? trim($request->email)
+                        : ($userExist->email ?: null);
+                    $nameParts = preg_split('/\s+/', trim($request->name), 2);
+
+                    $userExist->first_name = $nameParts[0] ?? $request->name;
+                    $userExist->last_name = $nameParts[1] ?? ($userExist->last_name ?: '');
+                    $userExist->phone = $phone;
+                    $userExist->phone_code = $phoneCode;
+                    if ($email) {
+                        $userExist->email = $email;
+                    }
+                    if (empty($userExist->remember_token)) {
+                        $userExist->remember_token = $token;
+                    }
+                    $userExist->status = 2;
+                    $userExist->is_otp_verify = 0;
+                    $userExist->is_verify_user = 0;
+                    $userExist->save();
+
+                    // Always require OTP for guest API continue
+                    $otpData = \Helper::sendMobileVerificationOtp($userExist, $phoneCode);
                     return response()->json([
                         'success' => 'true',
                         'guest_otp' => true,
-                        'result' => $response,
-                        'redirect' => 'checkout',
+                        'result' => [
+                            'otp' => strval($otpData['otp']),
+                            'otp_expire_time' => strval($otpData['otp_expire_time']),
+                            'uniqid' => strval(@$userExist->uniqid ?: ''),
+                            'remember_token' => strval(@$userExist->remember_token ?: ''),
+                        ],
+                        'redirect' => 'otp',
+                        'message' => 'otp_sent',
                     ]);
                 }
-                // Not verified → resend OTP
-                $userExist->otp = $otp;
-                $userExist->otp_expire_time = $otp_expire_time;
-                $userExist->save();
-                $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
-                $url_link = \URL::to("/");
-                try {
-                    $this->attachment_otp_email($userExist->email, $otp, $userExist->first_name, $logo, $url_link);
-                } catch (\Exception $e) {}
-                $response = [
-                    'otp' => strval(@$userExist->otp ?: ''),
-                    'otp_expire_time' => strval(@$userExist->otp_expire_time ?: ''),
-                    'uniqid' => strval(@$userExist->uniqid ?: ''),
-                    'remember_token' => strval(@$userExist->remember_token ?: '')
-                ];
-                Helper::afterLoginAddUserCartItemData();
-                return response()->json([
-                    'success' => 'true',
-                    'guest_otp' => true,
-                    'result' => $response,
-                    'redirect' => 'checkout',
-                ]);
             } else {
-                // For non-guest or non-guest-user, show already exists error as before
                 $errors = [];
                 if ($isGuest) {
-                    if ($userExist->email === $request->email) {
-                        $errors['email'] = ['The email address is already registered.'];
-                    }
-                    if ($userExist->phone === $request->email) {
-                        $errors['email'] = ['The phone number is already registered.'];
-                    }
+                    $errors['phone'] = ['This phone/email is already registered. Please login.'];
                 } else {
                     if ($userExist->email === $request->email) {
                         $errors['email'] = ['The email address is already registered.'];
                     }
                     if ($userExist->phone === $request->phone) {
-                        $errors['phone'] = ['The phone number is already registered.'];
+                        $errors['phone'] = ['The phone number already exists'];
                     }
                 }
                 return response()->json($errors, 422);
             }
         } else if ($isGuest) {
-            Helper::afterLoginAddUserCartItemData();
-            // New guest user: direct login, no OTP validation required
+            $phone = preg_replace('/\D+/', '', (string) ($request->phone ?: $request->email));
+            $phoneCode = $request->phone_code ?: '233';
+            $email = !empty($request->email) && filter_var($request->email, FILTER_VALIDATE_EMAIL)
+                ? trim($request->email)
+                : null;
+            $nameParts = preg_split('/\s+/', trim($request->name), 2);
+
             $user = new MainUser;
-            $uniqid = uniqid();
-            $user->uniqid = $uniqid;
+            $user->uniqid = uniqid();
             $user->label_type = 1;
-            $user->first_name = $request->name ?? '';
-            $user->last_name  = $request->last_name ?? '';
-            $value = $request->email;
-            $email = null;
-            $phone = null;
-            if (!empty($value)) {
-                if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
-                    $email = $value;
-                } elseif (preg_match('/^[0-9]{8,15}$/', $value)) {
-                    $phone = $value;
-                }
-            }
+            $user->first_name = $nameParts[0] ?? $request->name;
+            $user->last_name = $nameParts[1] ?? '';
             $user->email = $email;
             $user->phone = $phone;
             $user->age = $request->age ?? '';
-            $user->phone_code = $request->phone_code ?? '';
-            $user->otp = null;
-            $user->otp_expire_time = null;
-            $user->is_otp_verify = 1; // Mark as verified
+            $user->phone_code = $phoneCode;
             $user->user_type = 1;
-            $user->status = 1; // Mark as active
+            $user->status = 2;
             $user->is_guest_user = 1;
-            $user->is_verify_user = 1;
+            $user->is_otp_verify = 0;
+            $user->is_verify_user = 0;
             $user->remember_token = $token;
             $user->save();
-            Helper::afterLoginAddUserCartItemData();
+
             $productVariants = json_decode($request->product_variants, true);
             if (!empty($productVariants)) {
-
                 foreach ($productVariants as $productId => $variants) {
                     foreach ($variants as $variantId => $qty) {
-
                         $variant = ProductVariants::find($variantId);
                         if (!$variant) continue;
-
                         $price = $variant->variant_discounted_price ?: $variant->variant_price;
-
                         Cart::updateOrCreate(
                             [
                                 'user_id' => $user->id,
@@ -319,19 +305,30 @@ class UserController extends Controller
                     }
                 }
             }
-            $response = [
-                'otp' => '',
-                'otp_expire_time' => '',
-                'uniqid' => strval(@$user->uniqid ?: ''),
-                'remember_token' => strval(@$user->remember_token ?: '')
-            ];
+
+            $otpData = \Helper::sendMobileVerificationOtp($user, $phoneCode);
+            if ($email) {
+                try {
+                    $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
+                    $url_link = \URL::to("/");
+                    $this->attachment_otp_email($email, $otpData['otp'], $user->first_name, $logo, $url_link);
+                } catch (\Exception $e) {}
+            }
+
             return response()->json([
                 'success' => 'true',
                 'guest_otp' => true,
-                'result' => $response,
-                'redirect' => 'checkout',
+                'result' => [
+                    'otp' => strval($otpData['otp']),
+                    'otp_expire_time' => strval($otpData['otp_expire_time']),
+                    'uniqid' => strval(@$user->uniqid ?: ''),
+                    'remember_token' => strval(@$user->remember_token ?: ''),
+                ],
+                'redirect' => 'otp',
+                'message' => 'otp_sent',
             ]);
         }
+
 
         // New normal user
         $user = new MainUser;
@@ -969,20 +966,28 @@ class UserController extends Controller
 
         $post = $request->all();
         if ($post) {
-            // Find user by uniqid, token, and otp
+            // Find user by uniqid + token (OTP may be Twilio Verify, not stored locally)
             $userdata = MainUser::where('uniqid', $request->uniqid)
-                ->where('otp', $request->otp)
                 ->where('remember_token', $request->token)
                 ->latest()->first();
+
+            // Legacy fallback: match local otp too
+            if (empty($userdata) && !\Helper::usesTwilioVerify()) {
+                $userdata = MainUser::where('uniqid', $request->uniqid)
+                    ->where('otp', $request->otp)
+                    ->where('remember_token', $request->token)
+                    ->latest()->first();
+            }
+
             if (!empty($userdata) && $userdata != "") {
-                // Check OTP expiry
-                if ($userdata->otp_expire_time <= date('Y-m-d H:i:s')) {
-                    $result['code'] = strval(-9);
-                    $result['message'] = 'otp_expired';
+                if (!\Helper::validateMobileOtp($userdata, $request->otp, $userdata->phone_code)) {
+                    $result['code'] = strval(-8);
+                    $result['message'] = 'otp_not_match';
                     $result['result'] = NULL;
                     $mainResult = $result;
                     return response()->json(new \App\Http\Resources\V1\SettingResource($mainResult));
                 }
+
                 // If guest user, update status and allow login
                 if ($userdata->is_guest_user) {
                     MainUser::where('uniqid', $userdata->uniqid)->update([
@@ -1010,13 +1015,15 @@ class UserController extends Controller
                     MainUser::where('uniqid', $userdata->uniqid)->update([
                         'is_verify_user' => 1,
                         'is_otp_verify' => 1,
+                        'otp' => null,
+                        'otp_expire_time' => null,
                         'is_phone' => @$request->device_type,
                         'device_token' => @$request->firebase_token,
                     ]);
                     $ismail = $this->sendRegisterToUser($userdata);
                     $response = [
-                        'otp' => strval(@$userdata->otp ?: ''),
-                        'otp_expire_time' => strval(@$userdata->otp_expire_time ?: ''),
+                        'otp' => '',
+                        'otp_expire_time' => '',
                         'uniqid' => strval(@$userdata->uniqid ?: ''),
                     ];
                     $result['code'] = strval(1);

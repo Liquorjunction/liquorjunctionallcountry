@@ -41,13 +41,17 @@
                                 </li>
                                 <li>
                                     <span class="title-two text-dark-grey d-block mb-0">{{@Helper::language('phone_number')}}</span>
-                                    {{-- <a href="{{isset($myProfile->phone) ? $myProfile->phone :''}}" class="title-two">+{{isset($myProfile->phone_code) ? $myProfile->phone_code :''}}&nbsp;{{isset($myProfile->phone) ? $myProfile->phone :''}}</a>
-                                     --}}
                                      <a href="{{ isset($myProfile->phone) ? 'tel:+' . $myProfile->phone_code . $myProfile->phone : '' }}" class="title-two">
                                         @if(isset($myProfile->phone))
                                             +{{ isset($myProfile->phone_code) ? $myProfile->phone_code : '' }}&nbsp;{{ $myProfile->phone }}
                                         @endif
                                     </a>
+                                    @if((int)@$myProfile->is_otp_verify === 1)
+                                        <span class="phone-verified-badge" style="display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;background:#e8f8ef;color:#1b7a3d;font-size:12px;font-weight:600;">Verified</span>
+                                    @else
+                                        <span class="phone-unverified-badge" style="display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;background:#fff3e8;color:#b85c00;font-size:12px;font-weight:600;">Not Verified</span>
+                                        <a href="{{ route('edit-profile') }}" class="border-button d-inline-block mt-2" style="margin-left:0;">Verify Mobile</a>
+                                    @endif
                                 </li>
                             </ul>
                             <a href="{{route('edit-profile')}}" class="border-button d-inline-block">{{@Helper::language('edit_info_btn')}}</a>

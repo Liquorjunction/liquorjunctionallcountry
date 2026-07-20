@@ -587,6 +587,9 @@
 
                         <input type="hidden" name="userName" id="userName" value="{{ $userData->first_name }}">
                         <input type="hidden" name="userPhone" id="userPhone" value="{{ $userData->phone }}">
+                        <input type="hidden" id="profile_complete" value="{{ !empty($profileStatus['complete']) ? 1 : 0 }}">
+                        <input type="hidden" id="profile_needs_otp" value="{{ !empty($profileStatus['needs_otp']) ? 1 : 0 }}">
+                        <input type="hidden" id="profile_message" value="{{ $profileStatus['message'] ?? '' }}">
 
                     </div>
 
@@ -1388,6 +1391,56 @@
     </div>
     </div>
 </section>
+<!-- Incomplete profile modal -->
+<div class="modal fade" id="completeProfileModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content p-3">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title">Complete Your Profile</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-3" id="completeProfileMessage">Please complete your profile and verify your mobile number before placing an order.</p>
+                <div id="completeProfileFields">
+                    <div class="form-group mb-3">
+                        <label>First Name <span class="star">*</span></label>
+                        <input type="text" class="form-control" id="cp_first_name" value="{{ $profileStatus['first_name'] ?? ($userData->first_name ?? '') }}">
+                    </div>
+                    <div class="form-group mb-3">
+                        <label>Last Name <span class="star">*</span></label>
+                        <input type="text" class="form-control" id="cp_last_name" value="{{ $profileStatus['last_name'] ?? ($userData->last_name ?? '') }}">
+                    </div>
+                    <div class="form-group mb-3">
+                        <label>Mobile Number <span class="star">*</span></label>
+                        <div class="d-flex gap-2 align-items-stretch">
+                            <select class="form-control" style="max-width:130px;" id="cp_phone_code">
+                                @php
+                                    $selectedCode = (string) ($profileStatus['phone_code'] ?? ($userData->phone_code ?? '233'));
+                                @endphp
+                                @foreach($countryData as $value)
+                                    <option value="{{ $value->phonecode }}" {{ (string)$value->phonecode === $selectedCode ? 'selected' : '' }}>
+                                        +{{ $value->phonecode }} ({{ $value->shortname }})
+                                    </option>
+                                @endforeach
+                            </select>
+                            <input type="tel" class="form-control" id="cp_phone" inputmode="numeric" placeholder="Mobile number without country code" value="{{ $profileStatus['phone'] ?? '' }}">
+                        </div>
+                        <small class="text-muted d-block mt-1">Enter local number only (example: 244123456). Country code is selected separately.</small>
+                    </div>
+                    <button type="button" class="solid-button w-100" id="cp_save_btn">Save & Continue</button>
+                </div>
+                <div id="completeProfileOtpFields" style="display:none;">
+                    <div class="form-group mb-3">
+                        <label>Enter OTP sent to your mobile</label>
+                        <input type="text" class="form-control" id="cp_otp" maxlength="6" inputmode="numeric" placeholder="6-digit OTP">
+                    </div>
+                    <button type="button" class="solid-button w-100" id="cp_verify_btn">Verify OTP</button>
+                </div>
+                <p class="red-text mt-2 mb-0" id="cp_error"></p>
+            </div>
+        </div>
+    </div>
+</div>
 <!--  -->
 <div class="modal order-successfully-modal fade p-0" id="OrderSuccessfully" tabindex="-1" aria-modal="true" role="dialog">
 
@@ -2018,25 +2071,13 @@
 
         let currentTotal = parseAmount(grandTotalElement.innerText)- giftAmount - parseFloat(deliveryAmount)+parseFloat(couponAmount);
 
-        // Check user Details
+        // Check user Details / force verified profile before order
         var userName = $('#userName').val();
         var userPhone = $('#userPhone').val();
-        console.log(userName , userPhone);
-        // if (!userName || !userPhone) {
-        if (!userName) {
-        Swal.fire({
-            icon: "warning",
-            title: "Missing Information",
-            text: "Please Update Profile Information before checking out!",
-            customClass: 
-            {
-                confirmButton: 'swal-custom-confirm',
-                popup: 'swal-small-popup'
-            }
-        }).then(() => {
-            location.href = "/edit-profile";
-        });
-        return false; 
+        var profileComplete = $('#profile_complete').val();
+        if (profileComplete != '1' || !userName || !userPhone) {
+            openCompleteProfileModal($('#profile_message').val() || 'Please complete your profile before placing an order.');
+            return false;
         }
 
         $.ajax({
@@ -2079,6 +2120,10 @@
             success: function(response) {
                 $('.loader').css("visibility", "hidden");
                 if (response.error == true) {
+                    if (response.type === 'incomplete_profile') {
+                        openCompleteProfileModal(response.message || $('#profile_message').val());
+                        return;
+                    }
                     Swal.fire({
                         title: "",
                         text: response.message,
@@ -2103,6 +2148,104 @@
         });
 
     }
+
+    function openCompleteProfileModal(message) {
+        $('#cp_error').text('');
+        $('#completeProfileMessage').text(message || 'Please complete your profile and verify your mobile number before placing an order.');
+        $('#completeProfileFields').show();
+        $('#completeProfileOtpFields').hide();
+        $('#cp_otp').val('');
+        var modalEl = document.getElementById('completeProfileModal');
+        if (window.bootstrap && bootstrap.Modal) {
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        } else {
+            $('#completeProfileModal').modal('show');
+        }
+    }
+
+    $(document).on('click', '#cp_save_btn', function() {
+        $('#cp_error').text('');
+        $.ajax({
+            type: 'POST',
+            url: "{{ route('checkout.completeProfile') }}",
+            data: {
+                _token: "{{ csrf_token() }}",
+                first_name: $('#cp_first_name').val(),
+                phone: $('#cp_phone').val(),
+                phone_code: $('#cp_phone_code').val(),
+                email: $('#cp_email').val()
+            },
+            beforeSend: function() {
+                $('.loader').css('visibility', 'visible');
+            },
+            success: function(res) {
+                $('.loader').css('visibility', 'hidden');
+                if (res.needs_otp) {
+                    $('#completeProfileFields').hide();
+                    $('#completeProfileOtpFields').show();
+                    $('#completeProfileMessage').text(res.message || 'Enter the OTP sent to your mobile.');
+                    return;
+                }
+                if (res.success) {
+                    $('#profile_complete').val('1');
+                    $('#userName').val($('#cp_first_name').val());
+                    $('#userPhone').val(String($('#cp_phone').val() || '').replace(/\D+/g, ''));
+                    if (window.bootstrap && bootstrap.Modal) {
+                        bootstrap.Modal.getOrCreateInstance(document.getElementById('completeProfileModal')).hide();
+                    } else {
+                        $('#completeProfileModal').modal('hide');
+                    }
+                    Swal.fire({ icon: 'success', text: res.message || 'Profile updated. You can place your order now.' });
+                }
+            },
+            error: function(xhr) {
+                $('.loader').css('visibility', 'hidden');
+                var msg = (xhr.responseJSON && (xhr.responseJSON.message || (xhr.responseJSON.errors && Object.values(xhr.responseJSON.errors)[0][0]))) || 'Unable to update profile.';
+                $('#cp_error').text(msg);
+            }
+        });
+    });
+
+    $(document).on('click', '#cp_verify_btn', function() {
+        $('#cp_error').text('');
+        $.ajax({
+            type: 'POST',
+            url: "{{ route('checkout.verifyProfileOtp') }}",
+            data: {
+                _token: "{{ csrf_token() }}",
+                otp: $('#cp_otp').val()
+            },
+            beforeSend: function() {
+                $('.loader').css('visibility', 'visible');
+            },
+            success: function(res) {
+                $('.loader').css('visibility', 'hidden');
+                if (res.success) {
+                    $('#profile_complete').val(res.complete ? '1' : '0');
+                    $('#userName').val(res.first_name || $('#cp_first_name').val());
+                    $('#userPhone').val(res.phone || String($('#cp_phone').val() || '').replace(/\D+/g, ''));
+                    if (window.bootstrap && bootstrap.Modal) {
+                        bootstrap.Modal.getOrCreateInstance(document.getElementById('completeProfileModal')).hide();
+                    } else {
+                        $('#completeProfileModal').modal('hide');
+                    }
+                    Swal.fire({ icon: 'success', text: res.message || 'Mobile verified successfully.' });
+                }
+            },
+            error: function(xhr) {
+                $('.loader').css('visibility', 'hidden');
+                var msg = (xhr.responseJSON && xhr.responseJSON.message) || 'OTP verification failed.';
+                $('#cp_error').text(msg);
+            }
+        });
+    });
+
+    $(document).ready(function() {
+        if ($('#profile_complete').val() != '1') {
+            openCompleteProfileModal($('#profile_message').val());
+        }
+    });
+
     $(document).ready(function() {
         if ($("input[name='address_radio']:checked")) {
             var user_address_id = $("input[name='address_radio']").val();

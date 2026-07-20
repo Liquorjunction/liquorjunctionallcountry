@@ -408,6 +408,9 @@ class WebsiteLoginController extends Controller
             if ($isGuest) {
                 $rules = [
                     'name' => ['required', 'min:3', 'max:30'],
+                    'phone' => ['required', 'min:9', 'max:15'],
+                    'email' => ['nullable', 'email'],
+                    'phone_code' => ['nullable'],
                 ];
             } else {
                 $rules = [
@@ -434,6 +437,8 @@ class WebsiteLoginController extends Controller
                 ];
             }
             $messages = [
+                'name.required' => 'Please enter your name',
+                'name.min' => 'Name must be at least 3 characters',
                 'first_name.required' => \Helper::language('first_name_required'),
                 'first_name.min' => \Helper::language('first_name_min_valiadation_msg'),
                 'first_name.max' => \Helper::language('first_name_max_validation'),
@@ -464,36 +469,40 @@ class WebsiteLoginController extends Controller
             if ($validator->fails()) {
                 return response()->json($validator->errors(), 422);
             }
+
+            // Extra anti-fake validation for guests
+            if ($isGuest) {
+                $guestName = trim($request->name);
+                $guestPhone = preg_replace('/\D+/', '', (string) $request->phone);
+                if (!Helper::isValidCustomerName($guestName)) {
+                    return response()->json(['name' => ['Please enter a valid real name.']], 422);
+                }
+                if (!Helper::isValidCustomerPhone($guestPhone)) {
+                    return response()->json(['phone' => ['Please enter a valid mobile number.']], 422);
+                }
+                $request->merge(['phone' => $guestPhone]);
+            }
+
             $userExist = null;
             $checkout_value = Session::get('checkout_value') ? Session::get('checkout_value') : 0;
             // Check if user exists
-            if($request->has('is_guest_user')){
-                $value = trim($request->email);
-
-                $email = null;
-                $phone = null;
-
-                if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
-                    $email = $value;
-                } elseif (preg_match('/^[0-9]{8,15}$/', $value)) {
-                    $phone = $value;
-                }
+            if ($isGuest) {
+                $email = !empty($request->email) && filter_var($request->email, FILTER_VALIDATE_EMAIL)
+                    ? trim($request->email)
+                    : null;
+                $phone = preg_replace('/\D+/', '', (string) $request->phone);
 
                 $userExist = MainUser::where(function ($query) use ($email, $phone) {
+                    $query->where('phone', $phone);
                     if ($email) {
-                        $query->where('email', $email);
-                    }
-
-                    if ($phone) {
-                        $query->orWhere('phone', $phone);
+                        $query->orWhere('email', $email);
                     }
                 })->first();
-            }else{
+            } else {
                 $userExist = MainUser::where(function ($query) use ($request) {
                     if ($request->email) {
                         $query->where('email', $request->email);
                     }
-
                     if ($request->phone) {
                         $query->orWhere('phone', $request->phone);
                     }
@@ -501,92 +510,91 @@ class WebsiteLoginController extends Controller
             }
             if ($userExist) {
                 if ($userExist->is_guest_user == 1) {
-
-                    // ✅ Already verified → direct login
                     $sessionCart = session()->get('cart_info', []);
-                    if ($request->has('is_guest_user') && $userExist->is_otp_verify == 1) {
-                        $value = request('email');
 
-                        if (!filter_var($value, FILTER_VALIDATE_EMAIL) && !preg_match('/^[0-9]{8,15}$/', $value)) {
-                            return back()->withErrors([
-                                'email' => 'Enter valid email or phone number'
-                            ]);
+                    if ($isGuest) {
+                        $email = !empty($request->email) && filter_var($request->email, FILTER_VALIDATE_EMAIL)
+                            ? trim($request->email)
+                            : ($userExist->email ?: null);
+                        $phone = preg_replace('/\D+/', '', (string) $request->phone);
+                        $phoneCode = $request->phone_code ?: ($userExist->phone_code ?: '233');
+                        $nameParts = preg_split('/\s+/', trim($request->name), 2);
+
+                        $userExist->first_name = $nameParts[0] ?? $request->name;
+                        $userExist->last_name = $nameParts[1] ?? ($userExist->last_name ?: '');
+                        $userExist->phone = $phone;
+                        $userExist->phone_code = $phoneCode;
+                        if ($email) {
+                            $userExist->email = $email;
                         }
-                        Auth::guard('user')->login($userExist);
-                        Helper::afterLoginAddUserCartItemData();
-
-                        if (!empty($sessionCart) || !empty($checkout_value)) {
-                            return response()->json([
-                                'success' => 'true',
-                                'guest_otp' => true,
-                                'redirect' => route('checkout')
-                            ]);
-                        } else {
-                            return response()->json(['success' => 'true', 'redirect' => route('frontend.home')]);
-                        }
-                    }
-
-                    // ✅ NOT verified → depends on action
-
-                    // 👉 If coming from LOGIN → send OTP
-                    if ($request->has('is_guest_user')) {
-                        $value = request('email');
-
-                        if (!filter_var($value, FILTER_VALIDATE_EMAIL) && !preg_match('/^[0-9]{8,15}$/', $value)) {
-                            return back()->withErrors([
-                                'email' => 'Enter valid email or phone number'
-                            ]);
-                        }
-
-                        if (!empty($sessionCart) || !empty($checkout_value)) {
-                            return response()->json([
-                                'success' => 'true',
-                                'guest_otp' => true,
-                                'redirect' => route('checkout')
-                            ]);
-                        } else {
-                            return response()->json(['success' => 'true', 'redirect' => route('frontend.home')]);
-                        }
-                    }
-                    // 👉 If coming from REGISTER → convert to normal user (NO OTP)
-                    else {
-                        $userExist->first_name = $request->first_name;
-                        $userExist->last_name = $request->last_name;
-                        $userExist->age = $request->age;
-                        $userExist->email = $request->email;
-                        $userExist->phone = $request->phone;
-                        $userExist->phone_code = $request->phone_code ?? $userExist->phone_code;
-
-                        $userExist->is_guest_user = 0;
-                        $userExist->is_otp_verify = 1; // ✅ IMPORTANT (skip OTP)
-                        $userExist->status = 1;
-
-                        if ($request->password) {
-                            $userExist->password = Hash::make($request->password);
-                        }
-
+                        // Always require fresh mobile OTP for guest checkout (block fake/reuse bypass)
+                        $userExist->status = 2;
+                        $userExist->is_otp_verify = 0;
+                        $userExist->is_verify_user = 0;
                         $userExist->save();
-                        Auth::guard('user')->login($userExist);
-                        Helper::afterLoginAddUserCartItemData();
+
+                        // Ensure any previous guest session is cleared before OTP
+                        if (auth()->guard('user')->check()) {
+                            auth()->guard('user')->logout();
+                        }
+
+                        Helper::sendMobileVerificationOtp($userExist, $phoneCode);
+
+                        \Session::put('otp_phone', $phone);
+                        \Session::put('email', $userExist->email ?: ('guest_' . $userExist->id . '@temp.local'));
+                        \Session::put('first_name', $userExist->first_name);
+                        \Session::put('phone_code', $phoneCode);
+                        \Session::put('id', $userExist->id);
 
                         return response()->json([
                             'success' => 'true',
-                            'redirect' => route('frontend.home')
+                            'guest_otp' => true,
+                            'redirect' => route('websitesendotp')
                         ]);
                     }
+
+                    // Full register converting guest → normal user still needs OTP
+                    $userExist->first_name = $request->first_name;
+                    $userExist->last_name = $request->last_name;
+                    $userExist->age = $request->age;
+                    $userExist->email = $request->email;
+                    $userExist->phone = $request->phone;
+                    $userExist->phone_code = $request->phone_code ?? $userExist->phone_code;
+                    $userExist->is_guest_user = 0;
+                    $userExist->is_otp_verify = 0;
+                    $userExist->status = 2;
+                    if ($request->password) {
+                        $userExist->password = Hash::make($request->password);
+                    }
+                    $userExist->save();
+
+                    Helper::sendMobileVerificationOtp($userExist, $userExist->phone_code);
+                    \Session::put('otp_phone', $userExist->phone);
+                    \Session::put('email', $userExist->email);
+                    \Session::put('first_name', $userExist->first_name);
+                    \Session::put('phone_code', $userExist->phone_code);
+                    \Session::put('id', $userExist->id);
+
+                    return response()->json([
+                        'success' => 'true',
+                        'guest_otp' => false,
+                        'redirect' => route('websitesendotp')
+                    ]);
                 } else {
-                    // For non-guest or non-guest-user, show already exists error as before
                     $errors = [];
-                    if($request->has('is_guest_user')){
-                        if ($userExist->email === $request->email) {
-                        $errors['email'] = ['The email address is already registered.'];
+                    if ($isGuest) {
+                        if (!empty($request->email) && $userExist->email === $request->email) {
+                            $errors['email'] = ['The email address is already registered. Please login instead.'];
                         }
-                        if ($userExist->phone === $request->email) {
-                            $errors['email'] = ['The phone number is already registered.'];
+                        if ($userExist->phone === preg_replace('/\D+/', '', (string) $request->phone)) {
+                            $errors['phone'] = ['The phone number is already registered. Please login instead.'];
                         }
-                    }else{
+                        if (empty($errors)) {
+                            $errors['phone'] = ['This account already exists. Please login instead.'];
+                        }
+                    } else {
                         if ($userExist->email === $request->email) {
-                        $errors['email'] = ['The email address is already registered.'];
+                            $errors['email'] = ['The email address is already registered.'];
                         }
                         if ($userExist->phone === $request->phone) {
                             $errors['phone'] = ['The phone number is already registered.'];
@@ -595,62 +603,58 @@ class WebsiteLoginController extends Controller
                     Alert::warning('Warning', $errors);
                     return response()->json($errors, 422);
                 }
-            }else if($request->has('is_guest_user')){
-                    $sessionCart = session()->get('cart_info', []);
+            } else if ($isGuest) {
+                    $phone = preg_replace('/\D+/', '', (string) $request->phone);
+                    $phoneCode = $request->phone_code ?: '233';
+                    $email = !empty($request->email) && filter_var($request->email, FILTER_VALIDATE_EMAIL)
+                        ? trim($request->email)
+                        : null;
+                    $nameParts = preg_split('/\s+/', trim($request->name), 2);
 
                     $user = new MainUser;
                     $uniqid = uniqid();
                     $user->uniqid = $uniqid;
                     $user->label_type = 1;
-
-                    $user->first_name = $request->name ?? '';
-                    $user->last_name  = $request->last_name ?? '';
-
-                    $value = $request->email;
-
-                    $email = null;
-                    $phone = null;
-
-                    if (!empty($value)) {
-                        if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
-                            $email = $value;
-                        } elseif (preg_match('/^[0-9]{8,15}$/', $value)) {
-                            $phone = $value;
-                        }
-                    }
-
+                    $user->first_name = $nameParts[0] ?? $request->name;
+                    $user->last_name = $nameParts[1] ?? '';
                     $user->email = $email;
                     $user->phone = $phone;
-
                     $user->age = $request->age ?? '';
-                    $user->phone_code = $request->phone_code ?? '';
-
-                    $user->otp = 1010;
-                    $user->is_otp_verify = 1;
-
+                    $user->phone_code = $phoneCode;
                     $user->user_type = 1;
+                    $user->status = 2;
+                    $user->is_guest_user = 1;
+                    $user->is_otp_verify = 0;
+                    $user->is_verify_user = 0;
+                    $user->save();
 
-                    $user->status = $isGuest ? 1 : 1;
-
-                    $user->is_guest_user = $isGuest ? 1 : 0;
-
-                    if (!$isGuest && !empty($request->password)) {
-                        $user->password = Hash::make($request->password);
+                    // Always require OTP for guest continue (web)
+                    if (auth()->guard('user')->check()) {
+                        auth()->guard('user')->logout();
                     }
 
-                    $user->save();
-                    Auth::guard('user')->login($user);
-                    Helper::afterLoginAddUserCartItemData();
+                    $otpData = Helper::sendMobileVerificationOtp($user, $phoneCode);
 
-                    if (!empty($sessionCart) || !empty($checkout_value)) {
-                            return response()->json([
-                                'success' => 'true',
-                                'guest_otp' => true,
-                                'redirect' => route('checkout')
-                            ]);
-                        } else {
-                            return response()->json(['success' => 'true', 'redirect' => route('frontend.home')]);
+                    \Session::put('otp_phone', $phone);
+                    \Session::put('email', $email ?: ('guest_' . $user->id . '@temp.local'));
+                    \Session::put('first_name', $user->first_name);
+                    \Session::put('phone_code', $phoneCode);
+                    \Session::put('id', $user->id);
+
+                    if ($email) {
+                        try {
+                            $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
+                            $url = \URL::to('/') . '/';
+                            $this->attachment_otp_email($email, $otpData['otp'], $user->first_name, $url, $logo);
+                        } catch (\Exception $e) {
                         }
+                    }
+
+                    return response()->json([
+                        'success' => 'true',
+                        'guest_otp' => true,
+                        'redirect' => route('websitesendotp')
+                    ]);
             }
             \Session::put('otp_phone', $request->phone);
             \Session::put('email', $request->email);
@@ -862,71 +866,126 @@ class WebsiteLoginController extends Controller
     }
     public function websiteSendOtpForm()
     {
+        // If already logged in but OTP not verified, force logout so OTP screen can show
         if (auth()->guard('user')->check()) {
-            $user_id = $this->user_id;
-            return redirect()->route('frontend.home', compact('user_id'));
-        } else {
-            $id = Session::get('id');
-            $user_id = $id;
-            $otp_phone = Session::get('otp_phone');
-            $forgot_email = Session::get('email');
-            // $users = MainUser::where('phone', $otp_phone)->latest()->first();
-            $users = MainUser::where('email', $forgot_email)->first();
-            if (!empty($users)) {
-                $datetime1 = new \DateTime();
-                $datetime2 = new \DateTime($users->otp_expire_time);
-                $interval = $datetime1->diff($datetime2);
-                $elapsed = $interval->format('%I:%S');
-                $invert = $interval->invert;
-                return view("frontend.auth.resendotp", compact('forgot_email', 'otp_phone', 'invert', 'elapsed', 'users', 'id', 'user_id'));
+            $authUser = auth()->guard('user')->user();
+            if ((int) $authUser->is_otp_verify === 1 && (int) $authUser->status === 1) {
+                return redirect()->route('frontend.home');
             }
-            Alert::success(\Helper::language('success'), __('backend.user_register_successfully'));
+            auth()->guard('user')->logout();
         }
+
+        $id = Session::get('id');
+        $user_id = $id;
+        $otp_phone = Session::get('otp_phone');
+        $forgot_email = Session::get('email');
+        $users = null;
+        if (!empty($otp_phone)) {
+            $users = MainUser::where('phone', $otp_phone)->latest()->first();
+        }
+        if (empty($users) && !empty($forgot_email)) {
+            $users = MainUser::where('email', $forgot_email)->latest()->first();
+        }
+        if (!empty($id) && empty($users)) {
+            $users = MainUser::find($id);
+        }
+        if (!empty($users)) {
+            $datetime1 = new \DateTime();
+            $datetime2 = new \DateTime($users->otp_expire_time ?: now());
+            $interval = $datetime1->diff($datetime2);
+            $elapsed = $interval->format('%I:%S');
+            $invert = $interval->invert;
+            $displayContact = $otp_phone ?: $forgot_email;
+            return view("frontend.auth.resendotp", compact('forgot_email', 'otp_phone', 'invert', 'elapsed', 'users', 'id', 'user_id', 'displayContact'));
+        }
+        Alert::warning('Warning', 'Please continue as guest again to receive OTP.');
+        return redirect()->route('guest.login');
     }
 
     public function webisteOtpVerification(Request $request)
     {
-        if ($request->digit_1 == "") {
-            return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_required')), 500);
-        }
-        if ($request->digit_2 == "") {
+        $otp = trim(
+            ($request->digit_1 ?? '') .
+            ($request->digit_2 ?? '') .
+            ($request->digit_3 ?? '') .
+            ($request->digit_4 ?? '') .
+            ($request->digit_5 ?? '') .
+            ($request->digit_6 ?? '')
+        );
 
-            return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_required')), 500);
-        }
-
-        if ($request->digit_3 == "") {
-
-            return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_required')), 500);
-        }
-        if ($request->digit_4 == "") {
-            return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_required')), 500);
+        $expectedLength = Helper::usesTwilioVerify() ? 6 : 4;
+        if ($otp === '' || strlen($otp) < $expectedLength) {
+            return response()->json([
+                'status' => 'error_otp',
+                'errors' => Helper::usesTwilioVerify()
+                    ? 'Please enter the 6-digit OTP sent to your mobile.'
+                    : \Helper::language('otp_required')
+            ], 500);
         }
 
         $data = $request->all();
         $userid = $request->user_id;
-        $otp = implode("", $data);
         $id = Session::get('id');
         $mobile_number = Session::get('otp_phone');
         $email = Session::get('email');
+        $phoneCode = Session::get('phone_code') ?: '233';
         $current_time = date('Y-m-d H:i:s');
-        // $user = MainUser::where('otp', '=', $otp)->where('phone', $mobile_number)->first();
-        $user = MainUser::where('email', $email)->where('otp', $otp)->where('phone', $mobile_number)->first();
-        \DB::enableQueryLog();
+
+        // Find pending user first (Twilio Verify does not store OTP in DB)
+        $user = null;
+        if (!empty($id)) {
+            $user = MainUser::find($id);
+        }
+        if (!$user && !empty($mobile_number)) {
+            $user = MainUser::where('phone', $mobile_number)->latest()->first();
+        }
+        if (!$user && !empty($email)) {
+            $user = MainUser::where('email', $email)->latest()->first();
+        }
+
+        // Legacy local-OTP match fallback
+        if ($user && !Helper::usesTwilioVerify() && (string) $user->otp !== 'VERIFY') {
+            $matched = null;
+            if (!empty($mobile_number)) {
+                $matched = MainUser::where('otp', $otp)->where('phone', $mobile_number)->latest()->first();
+            }
+            if (!$matched && !empty($email)) {
+                $matched = MainUser::where('otp', $otp)->where('email', $email)->latest()->first();
+            }
+            if (!$matched && !empty($id)) {
+                $matched = MainUser::where('otp', $otp)->where('id', $id)->first();
+            }
+            $user = $matched;
+        }
+
         if (!$user) {
             return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_incorrect')), 500);
-        } else {
-            if ($current_time > $user->otp_expire_time) {
-                return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_expired_msg')), 500);
-            }
-            try {
+        }
+
+        if (!Helper::validateMobileOtp($user, $otp, $phoneCode ?: $user->phone_code)) {
+            return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_incorrect')), 500);
+        }
+
+        if (!Helper::usesTwilioVerify() && (string) $user->otp !== 'VERIFY' && $current_time > $user->otp_expire_time) {
+            return response()->json(array('status' => 'error_otp', 'errors' => \Helper::language('otp_expired_msg')), 500);
+        }
+
+        try {
                 $updatepsw = MainUser::where('id', $user->id)->update([
                     'is_otp_verify' => 1,
                     'status' => 1,
                     'is_verify_user' => 1,
+                    'otp' => null,
+                    'otp_expire_time' => null,
                 ]);
                 \DB::enableQueryLog();
                 \DB::getQueryLog();
-                $ismail = $this->attachment_register_email($user);
+                if (!empty($user->email) && strpos($user->email, '@temp.local') === false) {
+                    try {
+                        $ismail = $this->attachment_register_email($user);
+                    } catch (\Exception $e) {
+                    }
+                }
                 Alert::success(\Helper::language('success'), __('backend.user_register_successfully'));
                 if ($user->is_guest_user == 1) {
 
@@ -955,7 +1014,6 @@ class WebsiteLoginController extends Controller
             } catch (\Exception $e) {
                 dd($e->getMessage());
             }
-        }
     }
 
     private function mergeGuestCartToUser($userId)
@@ -1054,9 +1112,18 @@ class WebsiteLoginController extends Controller
             $otp = $otp;
             $name = $name;
 
-            $ismail = $this->attachment_otp_email($email, $otp, $name, $url, $logo);
-            // dd($ismail);
-            // $sendsms= \Helper::sendTwilioSMS("+".$phonecode.$otp_phone, 'Your Otp is:'.$otp);
+            if (!empty($email) && strpos($email, '@temp.local') === false) {
+                try {
+                    $ismail = $this->attachment_otp_email($email, $otp, $name, $url, $logo);
+                } catch (\Exception $e) {
+                }
+            }
+            try {
+                $code = $phonecode ?: '233';
+                \Helper::sendTwilioSMS('+' . $code . $otp_phone, 'Dear Customer, Your OTP for Liquor Junction is ' . $otp . '. Valid for 5 mins.');
+            } catch (\Exception $e) {
+                logger()->error('Resend OTP SMS failed: ' . $e->getMessage());
+            }
 
             Alert::success(\Helper::language('success'), __('backend.otp_resend_successfully'));
             // return redirect()->route('frontend.home');

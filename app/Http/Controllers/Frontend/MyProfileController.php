@@ -122,6 +122,11 @@ class MyProfileController extends Controller
     {
         $user_id = $this->user_id;
         $myProfile = MainUser::where('id', $user_id)->where('status', '!=', 2)->first();
+        if ($myProfile) {
+            $parts = \Helper::normalizePhoneParts($myProfile->phone, $myProfile->phone_code);
+            $myProfile->phone = $parts['phone'];
+            $myProfile->phone_code = $parts['phone_code'];
+        }
         $countryData = DB::table('countries')->where('status',1)->orderby('phonecode', 'ASC')->get();
         return view('frontend.my-profile.edit-profile', compact('myProfile', 'countryData'));
     }
@@ -178,23 +183,129 @@ class MyProfileController extends Controller
             }
 
             $user = MainUser::find($user_id);
+            $previousParts = \Helper::normalizePhoneParts($user->phone, $user->phone_code);
+            $newParts = \Helper::normalizePhoneParts($request->phone, $request->phone_code ?: ($user->phone_code ?: '233'));
+            $previousPhone = $previousParts['phone'];
+            $newPhone = $newParts['phone'];
+            $previousCode = $previousParts['phone_code'];
+            $newCode = $newParts['phone_code'];
+
             $user->first_name = isset($request->first_name) ? $request->first_name : '';
             $user->last_name = isset($request->last_name) ? $request->last_name : '';
             $user->email = isset($request->email) ? $request->email : '';
-            $user->phone = isset($request->phone) ? $request->phone : '';
-            $user->phone_code = isset($request->phone_code) ? $request->phone_code : '';
+            $user->phone = $newPhone;
+            $user->phone_code = $newCode;
             $user->post_code = @$request->post_code;
             $user->country = @$request->country;
             $user->street_address = @$request->street_address;
             $user->city = @$request->city;
             $user->user_type = 1;
+
+            // If phone/code changed, require verification again
+            if ($previousPhone !== $newPhone || $previousCode !== $newCode) {
+                $user->is_otp_verify = 0;
+                $user->is_verify_user = 0;
+            }
+
             $user->save();
 
             Alert::success(\Helper::language('success'), __('backend.user_profile_update_successfully'));
 
-            return response()->json(['success' => 'true']);
+            return response()->json([
+                'success' => 'true',
+                'phone_verified' => (int) $user->is_otp_verify === 1,
+                'needs_phone_verify' => (int) $user->is_otp_verify !== 1,
+            ]);
         }
         abort(404);
+    }
+
+    /**
+     * Send OTP to verify mobile number from edit profile.
+     */
+    public function sendPhoneOtp(Request $request)
+    {
+        $authUser = auth()->guard('user')->user();
+        if (!$authUser || empty($authUser->id)) {
+            return response()->json(['error' => true, 'message' => 'Please login again.'], 401);
+        }
+
+        $user = MainUser::find($authUser->id);
+        if (!$user) {
+            return response()->json(['error' => true, 'message' => 'Please login again.'], 401);
+        }
+
+        $parts = \Helper::normalizePhoneParts($request->phone ?: $user->phone, $request->phone_code ?: ($user->phone_code ?: '233'));
+        $phone = $parts['phone'];
+        $phoneCode = $parts['phone_code'];
+
+        if (!\Helper::isValidCustomerPhone($phone, $phoneCode)) {
+            return response()->json(['error' => true, 'message' => 'Please enter a valid mobile number first.'], 422);
+        }
+
+        $phoneOwner = MainUser::where('phone', $phone)
+            ->where('id', '!=', $user->id)
+            ->where('is_otp_verify', 1)
+            ->where('status', '!=', 2)
+            ->first();
+        if ($phoneOwner) {
+            return response()->json(['error' => true, 'message' => 'This mobile number is already verified with another account.'], 422);
+        }
+
+        $user->phone = $phone;
+        $user->phone_code = $phoneCode;
+        $user->is_otp_verify = 0;
+        $user->save();
+
+        $otpData = \Helper::sendMobileVerificationOtp($user, $phoneCode);
+
+        return response()->json([
+            'success' => true,
+            'sms_sent' => !empty($otpData['sms_sent']),
+            'message' => !empty($otpData['sms_sent'])
+                ? 'OTP sent to your mobile number.'
+                : 'OTP could not be sent. Please check Mobile number or Country code.',
+            'otp_expire_time' => $otpData['otp_expire_time'] ?? null,
+        ], !empty($otpData['sms_sent']) ? 200 : 422);
+    }
+
+    /**
+     * Verify mobile OTP from edit profile.
+     */
+    public function verifyPhoneOtp(Request $request)
+    {
+        $authUser = auth()->guard('user')->user();
+        if (!$authUser || empty($authUser->id)) {
+            return response()->json(['error' => true, 'message' => 'Please login again.'], 401);
+        }
+
+        $user = MainUser::find($authUser->id);
+        if (!$user) {
+            return response()->json(['error' => true, 'message' => 'Please login again.'], 401);
+        }
+
+        $otp = trim((string) $request->otp);
+        if ($otp === '' || strlen($otp) < 4 || strlen($otp) > 8) {
+            return response()->json(['error' => true, 'message' => 'Please enter a valid OTP.'], 422);
+        }
+
+        if (!\Helper::validateMobileOtp($user, $otp, $user->phone_code)) {
+            return response()->json(['error' => true, 'message' => 'Incorrect or expired OTP. Please try again.'], 422);
+        }
+
+        $user->is_otp_verify = 1;
+        $user->is_verify_user = 1;
+        $user->status = 1;
+        $user->otp = null;
+        $user->otp_expire_time = null;
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Mobile number verified successfully.',
+            'phone' => $user->phone,
+            'phone_code' => $user->phone_code,
+        ]);
     }
 
     /**

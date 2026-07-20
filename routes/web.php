@@ -165,6 +165,8 @@ Route::middleware(['PreventBackHistory'])->group(function () {
         Route::get('/checkoutedit-address/{id}', [CheckoutController::class, 'checkouteditAddress'])->name('checkoutedit-address');
         Route::get('/checkoutedit-bill-address/{id}', [CheckoutController::class, 'checkouteditBillAddress'])->name('checkoutedit-bill-address');
         Route::post('/store-checkout', [CheckoutController::class, 'storePlaceOrder'])->name('storeCheckout');
+        Route::post('/checkout/complete-profile', [CheckoutController::class, 'completeProfile'])->name('checkout.completeProfile');
+        Route::post('/checkout/verify-profile-otp', [CheckoutController::class, 'verifyProfileOtp'])->name('checkout.verifyProfileOtp');
         Route::post('/apply-coupon', [CheckoutController::class, 'applyCoupon'])->name('applyCoupon');
         Route::post('/apply-reward', [CheckoutController::class, 'applyReward'])->name('applyReward');
         Route::post('/user-area-tax', [CheckoutController::class, 'getUserAreaTax'])->name('userAreaTax');
@@ -188,6 +190,8 @@ Route::middleware(['PreventBackHistory'])->group(function () {
         Route::get('/my-address', [MyProfileController::class, 'myaddress'])->name('my-address');
         Route::get('/edit-profile', [MyProfileController::class, 'edit'])->name('edit-profile');
         Route::post('/upadte-profile', [MyProfileController::class, 'update'])->name('upadte-profile');
+        Route::post('/profile/send-phone-otp', [MyProfileController::class, 'sendPhoneOtp'])->name('profile.sendPhoneOtp');
+        Route::post('/profile/verify-phone-otp', [MyProfileController::class, 'verifyPhoneOtp'])->name('profile.verifyPhoneOtp');
         Route::get('/favorite-list', [MyProfileController::class, 'favorite'])->name('favorite-list');
         Route::get('/reward-points', [MyProfileController::class, 'points'])->name('reward-points');
         Route::post('/favorite/status', [MyProfileController::class, 'statusUpdate'])->name('favorite-status');

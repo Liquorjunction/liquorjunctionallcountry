@@ -1717,6 +1717,16 @@ class CheckoutController extends Controller
         $userData = DB::table('main_users')->where('uniqid', $request->uniqid)->first();
         $user_id = $userData->id;
 
+        $profileStatus = \Helper::getOrderProfileStatus($userData);
+        if (!$profileStatus['complete']) {
+            $result['code'] = strval(0);
+            $result['message'] = 'incomplete_profile';
+            $result['error'] = $profileStatus['message'];
+            $result['needs_otp'] = $profileStatus['needs_otp'];
+            $result['result'] = $profileStatus;
+            return response()->json(new \App\Http\Resources\V1\SettingResource($result));
+        }
+
         $purchase_type = $request->purchase_type;
         $coupon_id = $request->coupon_id;
         $coupon_percentage = $request->coupon_percentage;

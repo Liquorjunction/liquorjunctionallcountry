@@ -10,6 +10,27 @@
     .otp-timmer2 {
         margin-left: 150px !important;
     }
+
+    .pass-wrap {
+        gap: 10px;
+        flex-wrap: nowrap;
+    }
+    .pass-wrap input.otp1 {
+        width: 48px;
+        height: 48px;
+        font-size: 22px;
+        line-height: 48px;
+    }
+    @media (max-width: 576px) {
+        .pass-wrap {
+            gap: 6px;
+        }
+        .pass-wrap input.otp1 {
+            width: 40px;
+            height: 44px;
+            font-size: 18px;
+        }
+    }
 </style>
 <!-- <main class="site-content"> -->
 <div class="loader" id="loader"></div>
@@ -18,7 +39,8 @@
         <div id="Register">
             <div class="registration-content">
                 <h1 class="text-center mb-2">{{@Helper::language('otp_verification_header')}}</h1>
-                <h6 class="text-center text-dark-grey mb-0">{{@Helper::language('enter_the_verification_code_we_just_sent_on')}} {{@$forgot_email}}</h6>
+                <h6 class="text-center text-dark-grey mb-0">{{@Helper::language('enter_the_verification_code_we_just_sent_on')}} {{ !empty($otp_phone) ? $otp_phone : (@$displayContact ?: @$forgot_email) }}</h6>
+                <p class="text-center text-dark-grey mt-1 mb-0">Enter the 6-digit OTP</p>
 
                 <div class="registration-card">
                     <form action="#" class="row registration-form" method="POST" enctype="multipart/form-data" id="otp_form">
@@ -29,6 +51,8 @@
                                     <input type="text" class="otp1" id="digit_2" name="digit_2" oninput="digitValidate(this);" onkeyup='tabChange(2)' data-next="digit-3" data-previous="digit-1" maxlength="1">
                                     <input type="text" class="otp1" id="digit_3" name="digit_3" oninput="digitValidate(this);" onkeyup='tabChange(3)' data-next="digit-4" data-previous="digit-2" maxlength="1">
                                     <input type="text" class="otp1" id="digit_4" name="digit_4" oninput="digitValidate(this);" onkeyup='tabChange(4)' data-next="digit-5" data-previous="digit-3" maxlength="1">
+                                    <input type="text" class="otp1" id="digit_5" name="digit_5" oninput="digitValidate(this);" onkeyup='tabChange(5)' data-next="digit-6" data-previous="digit-4" maxlength="1">
+                                    <input type="text" class="otp1" id="digit_6" name="digit_6" oninput="digitValidate(this);" onkeyup='tabChange(6)' data-next="digit-7" data-previous="digit-5" maxlength="1">
                                 </div>
                                 <span class="help-block" id="errorMessagecommon" style="display:none">
                                     <span style="color: red;display: none;" id="errorMsgcommon" class='validate text-center validate-error'></span>
@@ -131,12 +155,18 @@
 
     let tabChange = function(val) {
         let ele = document.querySelectorAll('.otp1');
+        if (!ele.length) return;
 
-        if (ele[val - 1].value != '') {
-            // console.log(ele,'yu');
-            ele[val].focus()
-        } else if (ele[val - 1].value == '') {
-            ele[val - 2].focus()
+        // Move forward when current box has value
+        if (ele[val - 1] && ele[val - 1].value != '') {
+            if (ele[val]) {
+                ele[val].focus();
+            }
+        } else if (ele[val - 1] && ele[val - 1].value == '') {
+            // Move backward on delete
+            if (ele[val - 2]) {
+                ele[val - 2].focus();
+            }
         }
     }
 

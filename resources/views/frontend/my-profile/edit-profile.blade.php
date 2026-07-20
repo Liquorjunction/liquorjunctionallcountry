@@ -50,25 +50,31 @@
                         <div class="col-lg-6 col-md-12 col-sm-6">
                             <div class="form-group">
                                 <label for="">{{@Helper::language('email_label')}}<span class="text-red"></span></label>
-                                <input type="email" readonly name="email"  placeholder="{{@Helper::language('enter_email_place')}}"value="{{isset($myProfile->email) ? $myProfile->email :''}}" class="required" required >
+                                <input type="email" readonly name="email"  placeholder="{{@Helper::language('enter_email_place')}}"value="{{isset($myProfile->email) ? $myProfile->email :''}}" class="required" required style="background: #f1f1f1;">
                                 <div class="invalid-feedback">
                                 </div>
                             </div>
                         </div>
                         <div class="col-lg-6 col-md-12 col-sm-6">
                             <div class="form-group has-validation">
-                                <label for="">{{@Helper::language('phone_number')}}<span class="text-red">*</span></label>
+                                <label for="">
+                                    {{@Helper::language('phone_number')}}<span class="text-red">*</span>
+                                    <span id="phoneVerifiedBadge" class="phone-verified-badge" style="{{ (int)@$myProfile->is_otp_verify === 1 ? '' : 'display:none;' }}">Verified</span>
+                                    <span id="phoneUnverifiedBadge" class="phone-unverified-badge" style="{{ (int)@$myProfile->is_otp_verify === 1 ? 'display:none;' : '' }}">Not Verified</span>
+                                </label>
                                 <div class="input-group phone-number">
-                                    <!-- <span class="numbers body-normal text-black d-inline-block">+61</span> -->
-                                    <select class="numbers" name="phone_code" >
+                                    <select class="numbers" name="phone_code" id="phone_code">
                                         @foreach($countryData as $value)
                                         <option value="{{$value->phonecode}}" {{(@$myProfile->phone_code == $value->phonecode) ? 'selected' : ''}} > + {{$value->phonecode.' ('.$value->shortname.')'}}</option>
-                                        
                                         @endforeach
                                     </select>
                                     <input type="tel" name="phone" maxlength="15" placeholder="{{@Helper::language('enter_phone_number_place')}}" value="{{isset($myProfile->phone) ? $myProfile->phone :''}}" id="phone" required>
                                     <div class="invalid-feedback">
                                     </div>
+                                </div>
+                                <div class="mt-2" id="phoneVerifyActions" style="{{ (int)@$myProfile->is_otp_verify === 1 ? 'display:none;' : '' }}">
+                                    <button type="button" class="border-button" id="btnVerifyPhone">Verify Mobile Number</button>
+                                    <small class="d-block text-dark-grey mt-1">Verify your mobile number to place orders securely.</small>
                                 </div>
                             </div>
                         </div>
@@ -82,6 +88,53 @@
         </div>
     </div>
 </section>
+
+<!-- Verify phone OTP modal -->
+<div class="modal fade" id="profilePhoneOtpModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content p-3">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title">Verify Mobile Number</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-3" id="profileOtpMessage">Enter the OTP sent to your mobile number.</p>
+                <div class="form-group mb-3">
+                    <label>OTP</label>
+                    <input type="text" class="form-control" id="profile_otp" maxlength="6" inputmode="numeric" placeholder="Enter 6-digit OTP">
+                </div>
+                <button type="button" class="solid-button w-100 mb-2" id="btnSubmitProfileOtp">Verify OTP</button>
+                <button type="button" class="border-button w-100" id="btnResendProfileOtp">Resend OTP</button>
+                <p class="red-text mt-2 mb-0" id="profileOtpError"></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .phone-verified-badge {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 2px 10px;
+        border-radius: 12px;
+        background: #e8f8ef;
+        color: #1b7a3d;
+        font-size: 12px;
+        font-weight: 600;
+        vertical-align: middle;
+    }
+    .phone-unverified-badge {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 2px 10px;
+        border-radius: 12px;
+        background: #fff3e8;
+        color: #b85c00;
+        font-size: 12px;
+        font-weight: 600;
+        vertical-align: middle;
+    }
+</style>
 <script src="{{ asset('assets/frontend/js/jquery.min.js') }}"></script>
 <script src="https://ajax.aspnetcdn.com/ajax/jquery.validate/1.11.1/jquery.validate.min.js"></script>
 <script type="text/javascript">
@@ -195,9 +248,18 @@
                     $('.loader').css("visibility", "visible");
                 },
                 success: function(response) {
-                    // return false;
-                    // console.log(response);
-                    // $('.loader').css("visibility", "visible");
+                    if (response.needs_phone_verify) {
+                        markPhoneUnverified();
+                        if (typeof Swal !== 'undefined') {
+                            Swal.fire({
+                                icon: 'info',
+                                text: 'Profile saved. Please verify your mobile number.'
+                            }).then(function() {
+                                openProfilePhoneOtp();
+                            });
+                            return;
+                        }
+                    }
                     var url = "{{route('my-account')}}";
                     window.location.href = url;
                 },
@@ -238,6 +300,116 @@
                 }
             });
         }
+    });
+
+    var initialPhone = $('#phone').val();
+    var initialPhoneCode = $('#phone_code').val();
+    var phoneVerified = {{ (int)@$myProfile->is_otp_verify === 1 ? 'true' : 'false' }};
+
+    function markPhoneVerified() {
+        phoneVerified = true;
+        $('#phoneVerifiedBadge').show();
+        $('#phoneUnverifiedBadge').hide();
+        $('#phoneVerifyActions').hide();
+        initialPhone = $('#phone').val();
+        initialPhoneCode = $('#phone_code').val();
+    }
+
+    function markPhoneUnverified() {
+        phoneVerified = false;
+        $('#phoneVerifiedBadge').hide();
+        $('#phoneUnverifiedBadge').show();
+        $('#phoneVerifyActions').show();
+    }
+
+    function showProfileOtpModal() {
+        $('#profileOtpError').text('');
+        $('#profile_otp').val('');
+        var modalEl = document.getElementById('profilePhoneOtpModal');
+        if (window.bootstrap && bootstrap.Modal) {
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        } else {
+            $('#profilePhoneOtpModal').modal('show');
+        }
+    }
+
+    function hideProfileOtpModal() {
+        var modalEl = document.getElementById('profilePhoneOtpModal');
+        if (window.bootstrap && bootstrap.Modal) {
+            bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+        } else {
+            $('#profilePhoneOtpModal').modal('hide');
+        }
+    }
+
+    function openProfilePhoneOtp() {
+        $('#profileOtpError').text('');
+        $.ajax({
+            type: 'POST',
+            url: "{{ route('profile.sendPhoneOtp') }}",
+            data: {
+                _token: "{{ csrf_token() }}",
+                phone: $('#phone').val(),
+                phone_code: $('#phone_code').val()
+            },
+            beforeSend: function() {
+                $('.loader').css('visibility', 'visible');
+            },
+            success: function(res) {
+                $('.loader').css('visibility', 'hidden');
+                $('#profileOtpMessage').text(res.message || 'Enter the OTP sent to your mobile number.');
+                showProfileOtpModal();
+            },
+            error: function(xhr) {
+                $('.loader').css('visibility', 'hidden');
+                var msg = (xhr.responseJSON && xhr.responseJSON.message) || 'Unable to send OTP.';
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({ icon: 'error', text: msg });
+                } else {
+                    alert(msg);
+                }
+            }
+        });
+    }
+
+    $('#phone, #phone_code').on('change input', function() {
+        if ($('#phone').val() !== initialPhone || $('#phone_code').val() !== initialPhoneCode) {
+            markPhoneUnverified();
+        } else if (phoneVerified) {
+            markPhoneVerified();
+        }
+    });
+
+    $('#btnVerifyPhone, #btnResendProfileOtp').on('click', function() {
+        openProfilePhoneOtp();
+    });
+
+    $('#btnSubmitProfileOtp').on('click', function() {
+        $('#profileOtpError').text('');
+        $.ajax({
+            type: 'POST',
+            url: "{{ route('profile.verifyPhoneOtp') }}",
+            data: {
+                _token: "{{ csrf_token() }}",
+                otp: $('#profile_otp').val()
+            },
+            beforeSend: function() {
+                $('.loader').css('visibility', 'visible');
+            },
+            success: function(res) {
+                $('.loader').css('visibility', 'hidden');
+                hideProfileOtpModal();
+                markPhoneVerified();
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({ icon: 'success', text: res.message || 'Mobile number verified successfully.' });
+                }
+            },
+            error: function(xhr) {
+                $('.loader').css('visibility', 'hidden');
+                var msg = (xhr.responseJSON && xhr.responseJSON.message) || 'OTP verification failed.';
+                $('#profileOtpError').text(msg);
+            }
+        });
     });
 </script>
 @endsection

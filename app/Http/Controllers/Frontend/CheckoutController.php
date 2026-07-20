@@ -287,6 +287,7 @@ class CheckoutController extends Controller
 
         // Loyalty Info
         $loyaltyInfo = Loyalty::where('status', '=', '1')->first();
+        $profileStatus = \Helper::getOrderProfileStatus($userData);
 
         return view("frontend.checkout.checkout", compact(
             'userData',
@@ -306,7 +307,8 @@ class CheckoutController extends Controller
             'is_buy_now',
             'discountDetails',
             'totalPoints',
-            'loyaltyInfo'
+            'loyaltyInfo',
+            'profileStatus'
         ));
     }
 
@@ -1352,6 +1354,17 @@ class CheckoutController extends Controller
         logger()->info($request->all());
 
         $user_id = $this->user_id;
+        $userProfile = \DB::table('main_users')->where('id', $user_id)->first();
+        $profileStatus = \Helper::getOrderProfileStatus($userProfile);
+        if (!$profileStatus['complete']) {
+            return response()->json([
+                'error' => true,
+                'message' => $profileStatus['message'],
+                'type' => 'incomplete_profile',
+                'needs_otp' => $profileStatus['needs_otp'],
+            ]);
+        }
+
         $user_address_id = $request->user_address_id;
         $user_bill_address_id = $request->user_bill_address_id;
         $payment_method = $request->payment_method;
@@ -2047,5 +2060,135 @@ class CheckoutController extends Controller
 
         // return response()->json($response);
         return redirect('cart');
+    }
+
+    /**
+     * Save incomplete checkout profile details and send mobile OTP when needed.
+     */
+    public function completeProfile(Request $request)
+    {
+        $authUser = auth()->guard('user')->user();
+        if (!$authUser || empty($authUser->id)) {
+            return response()->json(['error' => true, 'message' => 'Please login again.'], 401);
+        }
+
+        // Guard uses database driver (GenericUser) — load Eloquent model for save()
+        $user = \App\Models\MainUser::find($authUser->id);
+        if (!$user) {
+            return response()->json(['error' => true, 'message' => 'Please login again.'], 401);
+        }
+
+        $validator = \Validator::make($request->all(), [
+            'first_name' => 'required|min:3|max:50',
+            'phone' => 'required|min:9|max:15',
+            'phone_code' => 'nullable',
+            'email' => 'nullable|email',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => true, 'errors' => $validator->errors()], 422);
+        }
+
+        $firstName = trim($request->first_name);
+        $parts = \Helper::normalizePhoneParts($request->phone, $request->phone_code ?: ($user->phone_code ?: '233'));
+        $phone = $parts['phone'];
+        $phoneCode = $parts['phone_code'];
+        $email = !empty($request->email) ? trim($request->email) : $user->email;
+
+        if (!\Helper::isValidCustomerName($firstName)) {
+            return response()->json(['error' => true, 'message' => 'Please enter a valid real name.'], 422);
+        }
+        if (!\Helper::isValidCustomerPhone($phone, $phoneCode)) {
+            return response()->json(['error' => true, 'message' => 'Please enter a valid mobile number.'], 422);
+        }
+
+        $phoneOwner = \App\Models\MainUser::where('phone', $phone)
+            ->where('id', '!=', $user->id)
+            ->where('is_otp_verify', 1)
+            ->where('status', '!=', 2)
+            ->first();
+        if ($phoneOwner) {
+            return response()->json(['error' => true, 'message' => 'This mobile number is already registered with another account.'], 422);
+        }
+
+        $previousParts = \Helper::normalizePhoneParts($user->phone, $user->phone_code);
+        $previousPhone = $previousParts['phone'];
+        $nameParts = preg_split('/\s+/', $firstName, 2);
+
+        $user->first_name = $nameParts[0] ?? $firstName;
+        $user->last_name = $nameParts[1] ?? ($user->last_name ?: '');
+        $user->phone = $phone;
+        $user->phone_code = $phoneCode;
+        if (!empty($email)) {
+            $user->email = $email;
+        }
+
+        $phoneChanged = $previousPhone !== $phone || (string) ($previousParts['phone_code'] ?? '') !== (string) $phoneCode;
+        $needsOtp = $phoneChanged || (int) $user->is_otp_verify !== 1 || !\Helper::isValidCustomerPhone($previousPhone, $previousParts['phone_code'] ?? null);
+
+        if ($needsOtp) {
+            $user->is_otp_verify = 0;
+            $user->save();
+            $otpData = \Helper::sendMobileVerificationOtp($user, $phoneCode);
+            return response()->json([
+                'success' => true,
+                'needs_otp' => true,
+                'sms_sent' => !empty($otpData['sms_sent']),
+                'message' => !empty($otpData['sms_sent'])
+                    ? 'OTP sent to your mobile number. Please verify to continue.'
+                    : 'OTP generated but SMS failed to send. Please check Please check your mobile number and Country Code.',
+                'otp_expire_time' => $otpData['otp_expire_time'],
+            ]);
+        }
+
+        $user->save();
+        $status = \Helper::getOrderProfileStatus($user->fresh());
+        return response()->json([
+            'success' => true,
+            'needs_otp' => false,
+            'complete' => $status['complete'],
+            'message' => 'Profile updated successfully.',
+        ]);
+    }
+
+    /**
+     * Verify checkout profile OTP before allowing place order.
+     */
+    public function verifyProfileOtp(Request $request)
+    {
+        $authUser = auth()->guard('user')->user();
+        if (!$authUser || empty($authUser->id)) {
+            return response()->json(['error' => true, 'message' => 'Please login again.'], 401);
+        }
+
+        $user = \App\Models\MainUser::find($authUser->id);
+        if (!$user) {
+            return response()->json(['error' => true, 'message' => 'Please login again.'], 401);
+        }
+
+        $otp = trim((string) $request->otp);
+        if ($otp === '' || strlen($otp) < 4 || strlen($otp) > 8) {
+            return response()->json(['error' => true, 'message' => 'Please enter a valid OTP.'], 422);
+        }
+
+        if (!\Helper::validateMobileOtp($user, $otp, $user->phone_code)) {
+            return response()->json(['error' => true, 'message' => 'Incorrect or expired OTP. Please try again.'], 422);
+        }
+
+        $user->is_otp_verify = 1;
+        $user->is_verify_user = 1;
+        $user->status = 1;
+        $user->otp = null;
+        $user->otp_expire_time = null;
+        $user->save();
+
+        $status = \Helper::getOrderProfileStatus($user->fresh());
+        return response()->json([
+            'success' => true,
+            'complete' => $status['complete'],
+            'message' => 'Mobile number verified successfully.',
+            'first_name' => $user->first_name,
+            'phone' => $user->phone,
+        ]);
     }
 }
