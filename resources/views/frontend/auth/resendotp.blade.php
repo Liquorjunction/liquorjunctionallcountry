@@ -41,11 +41,7 @@
                 <h1 class="text-center mb-2">{{@Helper::language('otp_verification_header')}}</h1>
                 <h6 class="text-center text-dark-grey mb-0">{{@Helper::language('enter_the_verification_code_we_just_sent_on')}} {{ !empty($displayContact) ? $displayContact : (!empty($otp_phone) ? $otp_phone : @$forgot_email) }}</h6>
                 <p class="text-center text-dark-grey mt-1 mb-0">
-                    @if(!empty($otpChannel) && $otpChannel === 'email')
-                        Enter the 6-digit OTP sent to your email
-                    @else
-                        Enter the 6-digit OTP sent to your mobile
-                    @endif
+                   
                 </p>
 
                 <div class="registration-card">

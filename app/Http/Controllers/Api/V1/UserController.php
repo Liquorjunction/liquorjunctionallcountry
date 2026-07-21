@@ -1756,6 +1756,51 @@ class UserController extends Controller
             $parts = \Helper::normalizePhoneParts($request->phone ?? $userData->phone, $request->phone_code ?? ($userData->phone_code ?: '233'));
             $newPhone = $parts['phone'];
             $newPhoneCode = $parts['phone_code'];
+
+            if (!\Helper::isAllowedPhoneCode($newPhoneCode)) {
+                return response()->json([
+                    'code' => strval(0),
+                    'message' => 'invalid_phone_code',
+                    'error' => 'Please select a valid country code from the list.',
+                    'result' => null,
+                ], 200);
+            }
+
+            if (!\Helper::isValidCustomerPhone($newPhone, $newPhoneCode)) {
+                return response()->json([
+                    'code' => strval(0),
+                    'message' => 'invalid_phone',
+                    'error' => 'Please enter a valid mobile number.',
+                    'result' => null,
+                ], 200);
+            }
+
+            $newEmail = isset($request->email) ? strtolower(trim((string) $request->email)) : $userData->email;
+            if (!empty($newEmail) && !\Helper::isAllowedProfileEmail($newEmail)) {
+                return response()->json([
+                    'code' => strval(0),
+                    'message' => 'invalid_email',
+                    'error' => 'Please enter a valid email address.',
+                    'result' => null,
+                ], 200);
+            }
+
+            if (!empty($newEmail)) {
+                $emailTaken = MainUser::where('email', $newEmail)
+                    ->where('id', '!=', $userData->id)
+                    ->where('status', '1')
+                    ->where('is_guest_user', '0')
+                    ->exists();
+                if ($emailTaken) {
+                    return response()->json([
+                        'code' => strval(0),
+                        'message' => 'email_already_used',
+                        'error' => 'This email is already registered with another account.',
+                        'result' => null,
+                    ], 200);
+                }
+            }
+
             $prevParts = \Helper::normalizePhoneParts($userData->phone ?? '', $userData->phone_code ?? '233');
             $phoneChanged = $prevParts['phone'] !== $newPhone
                 || (string) ($prevParts['phone_code'] ?? '') !== (string) $newPhoneCode;
@@ -1763,7 +1808,7 @@ class UserController extends Controller
             $updateData = [
                 'first_name' => @$request->first_name,
                 'last_name' => @$request->last_name,
-                'email' => @$request->email,
+                'email' => $newEmail,
                 'phone' => $newPhone,
                 'street_address' => @$request->address,
                 'states' => @$request->state,
@@ -1835,6 +1880,15 @@ class UserController extends Controller
         $parts = \Helper::normalizePhoneParts($request->phone ?: $user->phone, $request->phone_code ?: ($user->phone_code ?: '233'));
         $phone = $parts['phone'];
         $phoneCode = $parts['phone_code'];
+
+        if (!\Helper::isAllowedPhoneCode($phoneCode)) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'invalid_phone_code',
+                'error' => 'Please select a valid country code from the list.',
+                'result' => null,
+            ], 200);
+        }
 
         if (!\Helper::isValidCustomerPhone($phone, $phoneCode)) {
             return response()->json([

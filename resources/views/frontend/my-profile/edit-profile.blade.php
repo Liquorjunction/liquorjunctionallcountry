@@ -103,8 +103,14 @@
                     <label>OTP</label>
                     <input type="text" class="form-control" id="profile_otp" maxlength="6" inputmode="numeric" placeholder="Enter 6-digit OTP">
                 </div>
+                <p class="d-block text-center body-large text-light-grey mb-2" id="profile_exp_span">
+                    Expiring in <span id="profile_otp_timer">05:00</span>
+                </p>
                 <button type="button" class="solid-button w-100 mb-2" id="btnSubmitProfileOtp">Verify OTP</button>
-                <button type="button" class="border-button w-100" id="btnResendProfileOtp">Resend OTP</button>
+                <p class="text-center mb-0">
+                    Didn't receive OTP?
+                    <a href="javascript:void(0)" id="btnResendProfileOtp" style="pointer-events:none;cursor:default;opacity:0.6;">Resend</a>
+                </p>
                 <p class="red-text mt-2 mb-0" id="profileOtpError"></p>
             </div>
         </div>
@@ -292,6 +298,11 @@
                                             $("span#errorMsgEmail").show().html(message);
                                         } else if (field === "phone") {
                                             $('#phoneError').html(message).slideDown();
+                                        } else if (field === "phone_code") {
+                                            $('#phoneError').html(message).slideDown();
+                                            if (typeof Swal !== 'undefined') {
+                                                Swal.fire({ icon: 'error', text: message });
+                                            }
                                         }
                                     }
                                 }
@@ -305,7 +316,65 @@
     var initialPhone = $('#phone').val();
     var initialPhoneCode = $('#phone_code').val();
     var phoneVerified = {{ (int)@$myProfile->is_otp_verify === 1 ? 'true' : 'false' }};
+    var profileOtpTimerInterval = null;
+    var profileResendEnabled = false;
 
+    function disableProfileResend() {
+        profileResendEnabled = false;
+        $('#btnResendProfileOtp').css({ 'pointer-events': 'none', 'cursor': 'default', 'opacity': '0.6' });
+    }
+
+    function enableProfileResend() {
+        profileResendEnabled = true;
+        $('#btnResendProfileOtp').css({ 'pointer-events': '', 'cursor': '', 'opacity': '' });
+    }
+
+    function startProfileOtpTimer(durationSeconds) {
+        if (profileOtpTimerInterval) {
+            clearInterval(profileOtpTimerInterval);
+            profileOtpTimerInterval = null;
+        }
+        var remaining = typeof durationSeconds === 'number' ? durationSeconds : 300; // 5 minutes
+        disableProfileResend();
+        $('#profile_exp_span').html('Expiring in <span id="profile_otp_timer">05:00</span>');
+
+        function tick() {
+            var minutes = Math.floor(remaining / 60);
+            var seconds = remaining % 60;
+            minutes = minutes < 10 ? '0' + minutes : minutes;
+            seconds = seconds < 10 ? '0' + seconds : seconds;
+            $('#profile_otp_timer').text(minutes + ':' + seconds);
+
+            if (remaining <= 0) {
+                clearInterval(profileOtpTimerInterval);
+                profileOtpTimerInterval = null;
+                enableProfileResend();
+                $('#profile_exp_span').text('OTP Expired');
+                return;
+            }
+            remaining--;
+        }
+
+        tick();
+        profileOtpTimerInterval = setInterval(tick, 1000);
+    }
+
+    function getProfilePhoneDisplay() {
+        var code = String($('#phone_code').val() || '').replace(/\D+/g, '');
+        var phone = String($('#phone').val() || '').replace(/\D+/g, '');
+        if (!phone) {
+            return 'your mobile number';
+        }
+        return code ? ('+' + code + ' ' + phone) : phone;
+    }
+
+    function setProfileOtpMessage(extra) {
+        var msg = 'Enter the 6-digit verification code we just sent on ' + getProfilePhoneDisplay() + '.';
+        if (extra) {
+            msg = extra;
+        }
+        $('#profileOtpMessage').text(msg);
+    }
     function markPhoneVerified() {
         phoneVerified = true;
         $('#phoneVerifiedBadge').show();
@@ -313,6 +382,10 @@
         $('#phoneVerifyActions').hide();
         initialPhone = $('#phone').val();
         initialPhoneCode = $('#phone_code').val();
+        if (profileOtpTimerInterval) {
+            clearInterval(profileOtpTimerInterval);
+            profileOtpTimerInterval = null;
+        }
     }
 
     function markPhoneUnverified() {
@@ -325,6 +398,7 @@
     function showProfileOtpModal() {
         $('#profileOtpError').text('');
         $('#profile_otp').val('');
+        startProfileOtpTimer(300);
         var modalEl = document.getElementById('profilePhoneOtpModal');
         if (window.bootstrap && bootstrap.Modal) {
             bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -334,6 +408,10 @@
     }
 
     function hideProfileOtpModal() {
+        if (profileOtpTimerInterval) {
+            clearInterval(profileOtpTimerInterval);
+            profileOtpTimerInterval = null;
+        }
         var modalEl = document.getElementById('profilePhoneOtpModal');
         if (window.bootstrap && bootstrap.Modal) {
             bootstrap.Modal.getOrCreateInstance(modalEl).hide();
@@ -342,7 +420,7 @@
         }
     }
 
-    function openProfilePhoneOtp() {
+    function openProfilePhoneOtp(isResend) {
         $('#profileOtpError').text('');
         $.ajax({
             type: 'POST',
@@ -357,13 +435,21 @@
             },
             success: function(res) {
                 $('.loader').css('visibility', 'hidden');
-                $('#profileOtpMessage').text(res.message || 'Enter the OTP sent to your mobile number.');
-                showProfileOtpModal();
+                $('#profileOtpMessage').text('Enter the 6-digit verification code we just sent on ' + getProfilePhoneDisplay() + '.');
+                if (isResend) {
+                    $('#profile_otp').val('');
+                    startProfileOtpTimer(300);
+                } else {
+                    showProfileOtpModal();
+                }
             },
             error: function(xhr) {
                 $('.loader').css('visibility', 'hidden');
                 var msg = (xhr.responseJSON && xhr.responseJSON.message) || 'Unable to send OTP.';
-                if (typeof Swal !== 'undefined') {
+                if (isResend) {
+                    $('#profileOtpError').text(msg);
+                    enableProfileResend();
+                } else if (typeof Swal !== 'undefined') {
                     Swal.fire({ icon: 'error', text: msg });
                 } else {
                     alert(msg);
@@ -380,8 +466,16 @@
         }
     });
 
-    $('#btnVerifyPhone, #btnResendProfileOtp').on('click', function() {
-        openProfilePhoneOtp();
+    $('#btnVerifyPhone').on('click', function() {
+        openProfilePhoneOtp(false);
+    });
+
+    $('#btnResendProfileOtp').on('click', function(e) {
+        e.preventDefault();
+        if (!profileResendEnabled) {
+            return false;
+        }
+        openProfilePhoneOtp(true);
     });
 
     $('#btnSubmitProfileOtp').on('click', function() {

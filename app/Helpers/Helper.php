@@ -2785,6 +2785,49 @@ if (!empty($sessionCart)) {
     }
 
     /**
+     * Allow only phone country codes that exist in countries table (status=1).
+     * Prevents Inspect Element / API spoofing of fake phone codes.
+     */
+    static function isAllowedPhoneCode($phoneCode)
+    {
+        $code = preg_replace('/\D+/', '', (string) $phoneCode);
+        if ($code === '' || strlen($code) < 1 || strlen($code) > 5) {
+            return false;
+        }
+
+        try {
+            return DB::table('countries')
+                ->where('status', 1)
+                ->where(function ($q) use ($code) {
+                    $q->where('phonecode', $code)
+                        ->orWhere('phonecode', (int) $code)
+                        ->orWhereRaw('CAST(phonecode AS CHAR) = ?', [$code]);
+                })
+                ->exists();
+        } catch (\Throwable $e) {
+            // Fail closed if countries lookup is unavailable
+            logger()->warning('isAllowedPhoneCode lookup failed', ['error' => $e->getMessage()]);
+            return false;
+        }
+    }
+
+    /**
+     * Normalize + validate email for profile updates.
+     */
+    static function isAllowedProfileEmail($email)
+    {
+        $email = strtolower(trim((string) $email));
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return false;
+        }
+        // Block obvious placeholder / temp patterns used by guest accounts
+        if (strpos($email, '@temp.local') !== false) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * Check whether a user can place an order (verified + usable profile).
      *
      * @param  object|array|null  $user

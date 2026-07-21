@@ -146,23 +146,25 @@ class MyProfileController extends Controller
             $user_id = $this->user_id;
             $validator = Validator::make($request->all(), [
                 'first_name' => [
-                    'required', 
+                    'required',
                     'regex:/^[a-zA-Z]+$/u'
-                    
                 ],
-                'phone' => ['required', 
-                            // 'regex:/(01)[0-9]{9}/'
-                            ], 
-                // 'email' => ['required', Rule::unique('main_users')->ignore($user_id)->where(function ($query) {
-                //     return $query->where('status', '!=', '2');
-                // })]
+                'phone' => ['required', 'min:8', 'max:15'],
+                'phone_code' => ['required'],
                 'email' => [
                     'required',
-                    Rule::unique('main_users')->ignore($user_id) 
-                ]
+                    'email',
+                    Rule::unique('main_users', 'email')->ignore($user_id)->where(function ($query) {
+                        return $query->where('status', '1')->where('is_guest_user', '0');
+                    }),
+                ],
+            ], [
+                'phone_code.required' => 'Please select a valid country code.',
+                'email.email' => 'Please enter a valid email address.',
+                'email.unique' => 'This email is already registered with another account.',
             ]);
 
-              // Return validation errors
+            // Return validation errors
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
@@ -170,10 +172,56 @@ class MyProfileController extends Controller
                 ], 422);
             }
 
-            // Check if phone already exists for another user
-            $phoneExist = MainUser::where('phone', $request->phone)
-                        ->where('id', '!=', $user_id)
-                        ->first();
+            $user = MainUser::find($user_id);
+            if (!$user) {
+                return response()->json(['success' => false, 'message' => 'Please login again.'], 401);
+            }
+
+            $newEmail = strtolower(trim((string) $request->email));
+            $currentEmail = strtolower(trim((string) $user->email));
+
+            // Email field is read-only on profile UI — reject Inspect Element / forged changes
+            if ($newEmail !== $currentEmail) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => ['email' => ['Email cannot be changed from profile.']],
+                    'message' => 'Email cannot be changed from profile.',
+                ], 422);
+            }
+
+            if (!\Helper::isAllowedProfileEmail($newEmail)) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => ['email' => ['Please enter a valid email address.']],
+                ], 422);
+            }
+
+            $newParts = \Helper::normalizePhoneParts($request->phone, $request->phone_code);
+            $newPhone = $newParts['phone'];
+            $newCode = $newParts['phone_code'];
+
+            if (!\Helper::isAllowedPhoneCode($newCode)) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => ['phone_code' => ['Please select a valid country code from the list.']],
+                    'message' => 'Please select a valid country code from the list.',
+                ], 422);
+            }
+
+            if (!\Helper::isValidCustomerPhone($newPhone, $newCode)) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => ['phone' => ['Please enter a valid mobile number.']],
+                    'message' => 'Please enter a valid mobile number.',
+                ], 422);
+            }
+
+            // Check if phone already exists for another verified/active user
+            $phoneExist = MainUser::where('phone', $newPhone)
+                ->where('id', '!=', $user_id)
+                ->where('status', '1')
+                ->where('is_otp_verify', 1)
+                ->first();
 
             if ($phoneExist) {
                 return response()->json([
@@ -182,17 +230,13 @@ class MyProfileController extends Controller
                 ], 422);
             }
 
-            $user = MainUser::find($user_id);
             $previousParts = \Helper::normalizePhoneParts($user->phone, $user->phone_code);
-            $newParts = \Helper::normalizePhoneParts($request->phone, $request->phone_code ?: ($user->phone_code ?: '233'));
             $previousPhone = $previousParts['phone'];
-            $newPhone = $newParts['phone'];
             $previousCode = $previousParts['phone_code'];
-            $newCode = $newParts['phone_code'];
 
             $user->first_name = isset($request->first_name) ? $request->first_name : '';
             $user->last_name = isset($request->last_name) ? $request->last_name : '';
-            $user->email = isset($request->email) ? $request->email : '';
+            // Keep DB email — never overwrite from client on this screen
             $user->phone = $newPhone;
             $user->phone_code = $newCode;
             $user->post_code = @$request->post_code;
@@ -201,10 +245,9 @@ class MyProfileController extends Controller
             $user->city = @$request->city;
             $user->user_type = 1;
 
-            // If phone/code changed, require verification again
-            if ($previousPhone !== $newPhone || $previousCode !== $newCode) {
+            // Phone/code change → require mobile OTP again (do not touch email verification flag)
+            if ($previousPhone !== $newPhone || (string) $previousCode !== (string) $newCode) {
                 $user->is_otp_verify = 0;
-                $user->is_verify_user = 0;
             }
 
             $user->save();
@@ -238,6 +281,10 @@ class MyProfileController extends Controller
         $parts = \Helper::normalizePhoneParts($request->phone ?: $user->phone, $request->phone_code ?: ($user->phone_code ?: '233'));
         $phone = $parts['phone'];
         $phoneCode = $parts['phone_code'];
+
+        if (!\Helper::isAllowedPhoneCode($phoneCode)) {
+            return response()->json(['error' => true, 'message' => 'Please select a valid country code from the list.'], 422);
+        }
 
         if (!\Helper::isValidCustomerPhone($phone, $phoneCode)) {
             return response()->json(['error' => true, 'message' => 'Please enter a valid mobile number first.'], 422);

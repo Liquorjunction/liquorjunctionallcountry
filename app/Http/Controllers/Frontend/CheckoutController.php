@@ -2098,8 +2098,14 @@ class CheckoutController extends Controller
         if (!\Helper::isValidCustomerName($firstName)) {
             return response()->json(['error' => true, 'message' => 'Please enter a valid real name.'], 422);
         }
+        if (!\Helper::isAllowedPhoneCode($phoneCode)) {
+            return response()->json(['error' => true, 'message' => 'Please select a valid country code from the list.'], 422);
+        }
         if (!\Helper::isValidCustomerPhone($phone, $phoneCode)) {
             return response()->json(['error' => true, 'message' => 'Please enter a valid mobile number.'], 422);
+        }
+        if (!empty($email) && !\Helper::isAllowedProfileEmail($email) && strpos($email, '@temp.local') === false) {
+            return response()->json(['error' => true, 'message' => 'Please enter a valid email address.'], 422);
         }
 
         $phoneOwner = \App\Models\MainUser::where('phone', $phone)

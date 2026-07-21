@@ -2775,11 +2775,27 @@ class CheckoutController extends Controller
                 'result' => null,
             ], 200);
         }
+        if (!\Helper::isAllowedPhoneCode($phoneCode)) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'invalid_phone_code',
+                'error' => 'Please select a valid country code from the list.',
+                'result' => null,
+            ], 200);
+        }
         if (!\Helper::isValidCustomerPhone($phone, $phoneCode)) {
             return response()->json([
                 'code' => strval(0),
                 'message' => 'invalid_phone',
                 'error' => 'Please enter a valid mobile number.',
+                'result' => null,
+            ], 200);
+        }
+        if (!empty($email) && !\Helper::isAllowedProfileEmail($email) && strpos($email, '@temp.local') === false) {
+            return response()->json([
+                'code' => strval(0),
+                'message' => 'invalid_email',
+                'error' => 'Please enter a valid email address.',
                 'result' => null,
             ], 200);
         }

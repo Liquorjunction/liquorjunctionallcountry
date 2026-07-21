@@ -1434,7 +1434,14 @@
                         <label>Enter OTP sent to your mobile</label>
                         <input type="text" class="form-control" id="cp_otp" maxlength="6" inputmode="numeric" placeholder="6-digit OTP">
                     </div>
-                    <button type="button" class="solid-button w-100" id="cp_verify_btn">Verify OTP</button>
+                    <p class="d-block text-center body-large text-light-grey mb-2" id="cp_exp_span">
+                        Expiring in <span id="cp_otp_timer">05:00</span>
+                    </p>
+                    <button type="button" class="solid-button w-100 mb-2" id="cp_verify_btn">Verify OTP</button>
+                    <p class="text-center mb-0">
+                        Didn't receive OTP?
+                        <a href="javascript:void(0)" id="cp_resend_btn" style="pointer-events:none;cursor:default;opacity:0.6;">Resend</a>
+                    </p>
                 </div>
                 <p class="red-text mt-2 mb-0" id="cp_error"></p>
             </div>
@@ -2149,12 +2156,68 @@
 
     }
 
+    var cpOtpTimerInterval = null;
+    var cpResendEnabled = false;
+
+    function disableCpResend() {
+        cpResendEnabled = false;
+        $('#cp_resend_btn').css({ 'pointer-events': 'none', 'cursor': 'default', 'opacity': '0.6' });
+    }
+
+    function enableCpResend() {
+        cpResendEnabled = true;
+        $('#cp_resend_btn').css({ 'pointer-events': '', 'cursor': '', 'opacity': '' });
+    }
+
+    function startCpOtpTimer(durationSeconds) {
+        if (cpOtpTimerInterval) {
+            clearInterval(cpOtpTimerInterval);
+            cpOtpTimerInterval = null;
+        }
+        var remaining = typeof durationSeconds === 'number' ? durationSeconds : 300; // 5 minutes
+        disableCpResend();
+        $('#cp_exp_span').html('Expiring in <span id="cp_otp_timer">05:00</span>');
+
+        function tick() {
+            var minutes = Math.floor(remaining / 60);
+            var seconds = remaining % 60;
+            minutes = minutes < 10 ? '0' + minutes : minutes;
+            seconds = seconds < 10 ? '0' + seconds : seconds;
+            $('#cp_otp_timer').text(minutes + ':' + seconds);
+
+            if (remaining <= 0) {
+                clearInterval(cpOtpTimerInterval);
+                cpOtpTimerInterval = null;
+                enableCpResend();
+                $('#cp_exp_span').text('OTP Expired');
+                return;
+            }
+            remaining--;
+        }
+
+        tick();
+        cpOtpTimerInterval = setInterval(tick, 1000);
+    }
+
+    function getCpPhoneDisplay() {
+        var code = String($('#cp_phone_code').val() || '').replace(/\D+/g, '');
+        var phone = String($('#cp_phone').val() || '').replace(/\D+/g, '');
+        if (!phone) {
+            return 'your mobile number';
+        }
+        return code ? ('+' + code + ' ' + phone) : phone;
+    }
+
     function openCompleteProfileModal(message) {
         $('#cp_error').text('');
         $('#completeProfileMessage').text(message || 'Please complete your profile and verify your mobile number before placing an order.');
         $('#completeProfileFields').show();
         $('#completeProfileOtpFields').hide();
         $('#cp_otp').val('');
+        if (cpOtpTimerInterval) {
+            clearInterval(cpOtpTimerInterval);
+            cpOtpTimerInterval = null;
+        }
         var modalEl = document.getElementById('completeProfileModal');
         if (window.bootstrap && bootstrap.Modal) {
             bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -2183,7 +2246,9 @@
                 if (res.needs_otp) {
                     $('#completeProfileFields').hide();
                     $('#completeProfileOtpFields').show();
-                    $('#completeProfileMessage').text(res.message || 'Enter the OTP sent to your mobile.');
+                    $('#completeProfileMessage').text('Enter the OTP sent to ' + getCpPhoneDisplay() + '.');
+                    $('#cp_otp').val('');
+                    startCpOtpTimer(300);
                     return;
                 }
                 if (res.success) {
@@ -2206,6 +2271,38 @@
         });
     });
 
+    $(document).on('click', '#cp_resend_btn', function(e) {
+        e.preventDefault();
+        if (!cpResendEnabled) {
+            return false;
+        }
+        $('#cp_error').text('');
+        $.ajax({
+            type: 'POST',
+            url: "{{ route('profile.sendPhoneOtp') }}",
+            data: {
+                _token: "{{ csrf_token() }}",
+                phone: $('#cp_phone').val(),
+                phone_code: $('#cp_phone_code').val()
+            },
+            beforeSend: function() {
+                $('.loader').css('visibility', 'visible');
+            },
+            success: function(res) {
+                $('.loader').css('visibility', 'hidden');
+                $('#cp_otp').val('');
+                $('#completeProfileMessage').text('Enter the OTP sent to ' + getCpPhoneDisplay() + '.');
+                startCpOtpTimer(300);
+            },
+            error: function(xhr) {
+                $('.loader').css('visibility', 'hidden');
+                var msg = (xhr.responseJSON && xhr.responseJSON.message) || 'Unable to resend OTP.';
+                $('#cp_error').text(msg);
+                enableCpResend();
+            }
+        });
+    });
+
     $(document).on('click', '#cp_verify_btn', function() {
         $('#cp_error').text('');
         $.ajax({
@@ -2221,6 +2318,10 @@
             success: function(res) {
                 $('.loader').css('visibility', 'hidden');
                 if (res.success) {
+                    if (cpOtpTimerInterval) {
+                        clearInterval(cpOtpTimerInterval);
+                        cpOtpTimerInterval = null;
+                    }
                     $('#profile_complete').val(res.complete ? '1' : '0');
                     $('#userName').val(res.first_name || $('#cp_first_name').val());
                     $('#userPhone').val(res.phone || String($('#cp_phone').val() || '').replace(/\D+/g, ''));
