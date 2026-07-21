@@ -2246,7 +2246,7 @@
                 if (res.needs_otp) {
                     $('#completeProfileFields').hide();
                     $('#completeProfileOtpFields').show();
-                    $('#completeProfileMessage').text('Enter the OTP sent to ' + getCpPhoneDisplay() + '.');
+                    $('#completeProfileMessage').text('Enter the verification code we just sent on ' + getCpPhoneDisplay() + '.');
                     $('#cp_otp').val('');
                     startCpOtpTimer(300);
                     return;
@@ -2291,7 +2291,7 @@
             success: function(res) {
                 $('.loader').css('visibility', 'hidden');
                 $('#cp_otp').val('');
-                $('#completeProfileMessage').text('Enter the OTP sent to ' + getCpPhoneDisplay() + '.');
+                $('#completeProfileMessage').text('Enter the verification code we just sent on ' + getCpPhoneDisplay() + '.');
                 startCpOtpTimer(300);
             },
             error: function(xhr) {

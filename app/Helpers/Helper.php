@@ -2828,6 +2828,19 @@ if (!empty($sessionCart)) {
     }
 
     /**
+     * Display format for OTP screens: +233 244123456
+     */
+    static function formatPhoneDisplay($phone, $phoneCode = null)
+    {
+        $parts = self::normalizePhoneParts($phone ?? '', $phoneCode ?: '233');
+        if (empty($parts['phone'])) {
+            return '';
+        }
+        $code = preg_replace('/\D+/', '', (string) $parts['phone_code']);
+        return $code !== '' ? ('+' . $code . ' ' . $parts['phone']) : $parts['phone'];
+    }
+
+    /**
      * Check whether a user can place an order (verified + usable profile).
      *
      * @param  object|array|null  $user

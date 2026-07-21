@@ -98,7 +98,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <p class="mb-3" id="profileOtpMessage">Enter the OTP sent to your mobile number.</p>
+                <p class="mb-3" id="profileOtpMessage">Enter the verification code we just sent on your mobile number.</p>
                 <div class="form-group mb-3">
                     <label>OTP</label>
                     <input type="text" class="form-control" id="profile_otp" maxlength="6" inputmode="numeric" placeholder="Enter 6-digit OTP">
@@ -369,7 +369,7 @@
     }
 
     function setProfileOtpMessage(extra) {
-        var msg = 'Enter the 6-digit verification code we just sent on ' + getProfilePhoneDisplay() + '.';
+        var msg = 'Enter the verification code we just sent on ' + getProfilePhoneDisplay() + '.';
         if (extra) {
             msg = extra;
         }
@@ -435,7 +435,7 @@
             },
             success: function(res) {
                 $('.loader').css('visibility', 'hidden');
-                $('#profileOtpMessage').text('Enter the 6-digit verification code we just sent on ' + getProfilePhoneDisplay() + '.');
+                $('#profileOtpMessage').text('Enter the verification code we just sent on ' + getProfilePhoneDisplay() + '.');
                 if (isResend) {
                     $('#profile_otp').val('');
                     startProfileOtpTimer(300);

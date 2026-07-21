@@ -755,6 +755,7 @@ class WebsiteLoginController extends Controller
                 \Session::put('first_name', $data->first_name);
                 \Session::put('email', $data->email);
                 \Session::put('otp_phone', $data->phone);
+                \Session::put('phone_code', $data->phone_code ?: '233');
 
                 if ($data->status == 2) {
                     return response()->json([
@@ -873,6 +874,12 @@ class WebsiteLoginController extends Controller
         $name = $name;
         $phonecode = $userdata->phone_code;
         // dd($phonecode);
+        \Session::put('id', $userdata->id);
+        \Session::put('email', $userdata->email);
+        \Session::put('first_name', $userdata->first_name);
+        \Session::put('otp_phone', $userdata->phone);
+        \Session::put('phone_code', $userdata->phone_code ?: '233');
+        \Session::put('otp_channel', 'email'); // this login pending path emails OTP
         $ismail = $this->attachment_otp_email($email, $otp, $name, $url, $logo);
         // $sendsms= \Helper::sendTwilioSMS("+".$phonecode.$otp_phone, 'Your Otp is:'.$otp);
 
@@ -913,9 +920,16 @@ class WebsiteLoginController extends Controller
             $interval = $datetime1->diff($datetime2);
             $elapsed = $interval->format('%I:%S');
             $invert = $interval->invert;
-            $displayContact = ($otpChannel === 'email')
-                ? ($forgot_email ?: $users->email)
-                : ($otp_phone ?: $forgot_email);
+            if ($otpChannel === 'email') {
+                $displayContact = $forgot_email ?: $users->email;
+            } else {
+                $sessionPhoneCode = Session::get('phone_code') ?: ($users->phone_code ?? '233');
+                $sessionPhone = $otp_phone ?: ($users->phone ?? '');
+                $displayContact = \Helper::formatPhoneDisplay($sessionPhone, $sessionPhoneCode);
+                if ($displayContact === '') {
+                    $displayContact = $forgot_email ?: ($users->email ?? '');
+                }
+            }
             return view("frontend.auth.resendotp", compact('forgot_email', 'otp_phone', 'invert', 'elapsed', 'users', 'id', 'user_id', 'displayContact', 'otpChannel'));
         }
         Alert::warning('Warning', 'Please register or continue as guest again to receive OTP.');

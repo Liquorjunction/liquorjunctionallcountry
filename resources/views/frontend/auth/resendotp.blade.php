@@ -39,7 +39,7 @@
         <div id="Register">
             <div class="registration-content">
                 <h1 class="text-center mb-2">{{@Helper::language('otp_verification_header')}}</h1>
-                <h6 class="text-center text-dark-grey mb-0">{{@Helper::language('enter_the_verification_code_we_just_sent_on')}} {{ !empty($displayContact) ? $displayContact : (!empty($otp_phone) ? $otp_phone : @$forgot_email) }}</h6>
+                <h6 class="text-center text-dark-grey mb-0">{{@Helper::language('enter_the_verification_code_we_just_sent_on')}} <strong>{{ !empty($displayContact) ? $displayContact : (!empty($otp_phone) ? $otp_phone : @$forgot_email) }}</strong></h6>
                 <p class="text-center text-dark-grey mt-1 mb-0">
                    
                 </p>
