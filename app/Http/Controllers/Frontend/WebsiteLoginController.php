@@ -53,7 +53,11 @@ class WebsiteLoginController extends Controller
 
     public function redirectToGoogle()
     {
-        return Socialite::driver('google')->stateless()->redirect();
+        // Force Google account chooser (web is full-page redirect, not a JS popup)
+        return Socialite::driver('google')
+            ->stateless()
+            ->with(['prompt' => 'select_account'])
+            ->redirect();
     }
 
     /**
