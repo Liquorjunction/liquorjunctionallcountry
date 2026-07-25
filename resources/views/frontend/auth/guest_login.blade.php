@@ -66,19 +66,19 @@
                                     <p class="text-sm grey-text">{{ @Helper::language('login_or_continue_with') }}</p>
                                     <ul>
                                         <li>
-                                            <a href="{{ route('auth.facebook') }}" target="_blank">
+                                            <a href="{{ route('auth.facebook') }}">
                                                 <img src="{{ asset('assets/frontend/images/icon_login_facebook.svg') }}"
                                                     alt="">
                                             </a>
                                         </li>
                                         <li>
-                                            <a href="{{ route('auth.google') }}" target="_blank">
+                                            <a href="{{ route('auth.google') }}">
                                                 <img src="{{ asset('assets/frontend/images/icon_login_google.svg') }}"
                                                     alt="">
                                             </a>
                                         </li>
                                         <li>
-                                            <a href="{{ route('auth.apple') }}" target="_blank">
+                                            <a href="{{ route('auth.apple') }}">
                                                 <img src="{{ asset('assets/frontend/images/icon_login_apple.svg') }}"
                                                     alt="">
                                             </a>

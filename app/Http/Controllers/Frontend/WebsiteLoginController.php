@@ -150,6 +150,24 @@ class WebsiteLoginController extends Controller
                     ->first();
 
                 if ($userExist) {
+                    // Link Google to existing account with same email (no google_id yet)
+                    if (
+                        !empty($user->email)
+                        && strcasecmp((string) $userExist->email, (string) $user->email) === 0
+                        && empty($userExist->google_id)
+                    ) {
+                        $userExist->google_id = $user->id;
+                        $userExist->is_verify_user = 1;
+                        if ((int) $userExist->status !== 1) {
+                            $userExist->status = 1;
+                        }
+                        $userExist->save();
+
+                        Auth::guard('user')->login($userExist);
+                        session()->flash('success', 'Login successfully');
+                        return redirect()->route('frontend.home');
+                    }
+
                     $errors = [];
 
                     if (!empty($user->email) && $userExist->email === $user->email) {
@@ -229,6 +247,24 @@ class WebsiteLoginController extends Controller
                     ->first();
 
                 if ($userExist) {
+                    // Link Facebook to existing account with same email (no facebook_id yet)
+                    if (
+                        !empty($user->email)
+                        && strcasecmp((string) $userExist->email, (string) $user->email) === 0
+                        && empty($userExist->facebook_id)
+                    ) {
+                        $userExist->facebook_id = $user->id;
+                        $userExist->is_verify_user = 1;
+                        if ((int) $userExist->status !== 1) {
+                            $userExist->status = 1;
+                        }
+                        $userExist->save();
+
+                        Auth::guard('user')->login($userExist);
+                        session()->flash('success', 'Login successfully');
+                        return redirect()->route('frontend.home');
+                    }
+
                     $errors = [];
 
                     if (!empty($user->email) && $userExist->email === $user->email) {

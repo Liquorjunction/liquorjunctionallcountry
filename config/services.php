@@ -34,16 +34,21 @@ return [
     'google' => [
         'client_id' => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_SECRET_CLIENT_ID'),
-        // 'redirect' => 'http://127.0.0.1:8000/auth/google/callback',
-        'redirect' => 'https://liquorjunctionghana.com/auth/google/callback',
-        // 'redirect' => 'https://onlydance.vrinsoft.in/auth/google/callback',
+        // Use GOOGLE_REDIRECT_URI, else APP_URL + /auth/google/callback (stage/live safe)
+        'redirect' => env(
+            'GOOGLE_REDIRECT_URI',
+            rtrim((string) env('APP_URL', ''), '/') . '/auth/google/callback'
+        ),
     ],
 
     'facebook' => [
         'client_id' => env('FACEBOOK_CLIENT_ID'),
         'client_secret' => env('FACEBOOK_SECRET_CLIENT_ID'),
-        // 'redirect' => 'http://127.0.0.1:8000/auth/facebook/callback',
-        'redirect' => 'https://liquorjunctionghana.com/auth/facebook/callback',
+        // Use FACEBOOK_REDIRECT_URI, else APP_URL + /auth/facebook/callback (stage/live safe)
+        'redirect' => env(
+            'FACEBOOK_REDIRECT_URI',
+            rtrim((string) env('APP_URL', ''), '/') . '/auth/facebook/callback'
+        ),
     ],
 
     // 'apple' => [
