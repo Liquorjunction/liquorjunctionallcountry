@@ -240,6 +240,63 @@ class UserController extends Controller
                         'message' => 'otp_sent',
                     ]);
                 }
+
+                // Full register converting guest → normal user (same as website)
+                $parts = \Helper::normalizePhoneParts($request->phone ?? '', $request->phone_code ?? ($userExist->phone_code ?: '233'));
+                $otp = (string) mt_rand(100000, 999999);
+                $otp_expire_time = Carbon::now()->addMinutes(5)->toDateTimeString();
+
+                $userExist->first_name = $request->firstname ?? ($userExist->first_name ?: '');
+                $userExist->last_name = $request->lastname ?? ($userExist->last_name ?: '');
+                $userExist->age = $request->age ?? ($userExist->age ?: '');
+                $userExist->email = $request->email ?? $userExist->email;
+                $userExist->phone = $parts['phone'];
+                $userExist->phone_code = $parts['phone_code'];
+                $userExist->is_guest_user = 0;
+                $userExist->is_otp_verify = 0;
+                $userExist->is_verify_user = 0;
+                $userExist->status = 2;
+                $userExist->otp = $otp;
+                $userExist->otp_expire_time = $otp_expire_time;
+                if ($request->password) {
+                    $userExist->password = \Hash::make($request->password);
+                }
+                if (empty($userExist->remember_token)) {
+                    $userExist->remember_token = $token;
+                }
+                if (empty($userExist->uniqid)) {
+                    $userExist->uniqid = uniqid();
+                }
+                $userExist->save();
+
+                try {
+                    $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
+                    $url_link = \URL::to('/');
+                    $this->attachment_otp_email(
+                        $userExist->email,
+                        $otp,
+                        $userExist->first_name ?? '',
+                        $url_link . '/',
+                        $logo
+                    );
+                } catch (\Exception $e) {
+                    logger()->error('API guest→register email OTP failed: ' . $e->getMessage());
+                }
+
+                return response()->json([
+                    'success' => 'true',
+                    'guest_otp' => false,
+                    'otp_channel' => 'email',
+                    'guest_converted' => true,
+                    'result' => [
+                        'otp' => '',
+                        'otp_expire_time' => strval($userExist->otp_expire_time ?: ''),
+                        'uniqid' => strval($userExist->uniqid ?: ''),
+                        'remember_token' => strval($userExist->remember_token ?: ''),
+                    ],
+                    'redirect' => 'otp',
+                    'message' => 'otp_sent_on_email',
+                ]);
             } else {
                 $errors = [];
                 if ($isGuest) {
@@ -1899,11 +1956,7 @@ class UserController extends Controller
             ], 200);
         }
 
-        $phoneOwner = MainUser::where('phone', $phone)
-            ->where('id', '!=', $user->id)
-            ->where('is_otp_verify', 1)
-            ->where('status', '!=', 2)
-            ->first();
+        $phoneOwner = \Helper::findRegisteredVerifiedPhoneOwner($phone, $user->id);
         if ($phoneOwner) {
             return response()->json([
                 'code' => strval(0),
@@ -1989,6 +2042,10 @@ class UserController extends Controller
         $user->otp = null;
         $user->otp_expire_time = null;
         $user->save();
+
+        if ((int) $user->is_guest_user !== 1) {
+            \Helper::releaseGuestPhoneOwnership($user->phone, $user->id);
+        }
 
         $status = \Helper::getOrderProfileStatus($user->fresh());
 

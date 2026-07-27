@@ -2785,6 +2785,49 @@ if (!empty($sessionCart)) {
     }
 
     /**
+     * Find a registered (non-guest) user who already verified this phone.
+     * Guest accounts are claimable by registered / social users.
+     */
+    static function findRegisteredVerifiedPhoneOwner($phone, $excludeUserId = null)
+    {
+        $phone = preg_replace('/\D+/', '', (string) $phone);
+        if ($phone === '') {
+            return null;
+        }
+
+        $query = MainUser::where('phone', $phone)
+            ->where('is_guest_user', 0)
+            ->where('is_otp_verify', 1)
+            ->where('status', '!=', 2);
+
+        if (!empty($excludeUserId)) {
+            $query->where('id', '!=', $excludeUserId);
+        }
+
+        return $query->first();
+    }
+
+    /**
+     * After a non-guest user verifies a phone, clear that number from guest rows
+     * so ownership stays with the registered / social account.
+     */
+    static function releaseGuestPhoneOwnership($phone, $claimingUserId)
+    {
+        $phone = preg_replace('/\D+/', '', (string) $phone);
+        if ($phone === '' || empty($claimingUserId)) {
+            return 0;
+        }
+
+        return MainUser::where('phone', $phone)
+            ->where('id', '!=', $claimingUserId)
+            ->where('is_guest_user', 1)
+            ->update([
+                'phone' => null,
+                'is_otp_verify' => 0,
+            ]);
+    }
+
+    /**
      * Allow only phone country codes that exist in countries table (status=1).
      * Prevents Inspect Element / API spoofing of fake phone codes.
      */

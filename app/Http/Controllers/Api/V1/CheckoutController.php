@@ -2800,11 +2800,7 @@ class CheckoutController extends Controller
             ], 200);
         }
 
-        $phoneOwner = MainUser::where('phone', $phone)
-            ->where('id', '!=', $user->id)
-            ->where('is_otp_verify', 1)
-            ->where('status', '!=', 2)
-            ->first();
+        $phoneOwner = \Helper::findRegisteredVerifiedPhoneOwner($phone, $user->id);
         if ($phoneOwner) {
             return response()->json([
                 'code' => strval(0),
@@ -2919,6 +2915,10 @@ class CheckoutController extends Controller
         $user->otp = null;
         $user->otp_expire_time = null;
         $user->save();
+
+        if ((int) $user->is_guest_user !== 1) {
+            \Helper::releaseGuestPhoneOwnership($user->phone, $user->id);
+        }
 
         $status = \Helper::getOrderProfileStatus($user->fresh());
 

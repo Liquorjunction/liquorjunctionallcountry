@@ -216,12 +216,8 @@ class MyProfileController extends Controller
                 ], 422);
             }
 
-            // Check if phone already exists for another verified/active user
-            $phoneExist = MainUser::where('phone', $newPhone)
-                ->where('id', '!=', $user_id)
-                ->where('status', '1')
-                ->where('is_otp_verify', 1)
-                ->first();
+            // Check if phone already exists for another registered verified user (guests are claimable)
+            $phoneExist = \Helper::findRegisteredVerifiedPhoneOwner($newPhone, $user_id);
 
             if ($phoneExist) {
                 return response()->json([
@@ -290,11 +286,7 @@ class MyProfileController extends Controller
             return response()->json(['error' => true, 'message' => 'Please enter a valid mobile number first.'], 422);
         }
 
-        $phoneOwner = MainUser::where('phone', $phone)
-            ->where('id', '!=', $user->id)
-            ->where('is_otp_verify', 1)
-            ->where('status', '!=', 2)
-            ->first();
+        $phoneOwner = \Helper::findRegisteredVerifiedPhoneOwner($phone, $user->id);
         if ($phoneOwner) {
             return response()->json(['error' => true, 'message' => 'This mobile number is already verified with another account.'], 422);
         }
@@ -346,6 +338,11 @@ class MyProfileController extends Controller
         $user->otp = null;
         $user->otp_expire_time = null;
         $user->save();
+
+        // If this phone was used by a guest, release it so registered/social owns it
+        if ((int) $user->is_guest_user !== 1) {
+            \Helper::releaseGuestPhoneOwnership($user->phone, $user->id);
+        }
 
         return response()->json([
             'success' => true,
