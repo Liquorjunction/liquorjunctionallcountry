@@ -225,11 +225,12 @@ class UserController extends Controller
                     $userExist->is_verify_user = 0;
                     $userExist->save();
 
-                    // Always require OTP for guest API continue
+                    // Always require OTP for guest API continue (mobile only)
                     $otpData = \Helper::sendMobileVerificationOtp($userExist, $phoneCode);
                     return response()->json([
                         'success' => 'true',
                         'guest_otp' => true,
+                        'otp_channel' => 'mobile',
                         'result' => [
                             'otp' => strval($otpData['otp']),
                             'otp_expire_time' => strval($otpData['otp_expire_time']),
@@ -363,17 +364,12 @@ class UserController extends Controller
             }
 
             $otpData = \Helper::sendMobileVerificationOtp($user, $phoneCode);
-            if ($email) {
-                try {
-                    $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
-                    $url_link = \URL::to("/");
-                    $this->attachment_otp_email($email, $otpData['otp'], $user->first_name, $logo, $url_link);
-                } catch (\Exception $e) {}
-            }
+            // Guest: mobile OTP only — do not email OTP even if email is provided
 
             return response()->json([
                 'success' => 'true',
                 'guest_otp' => true,
+                'otp_channel' => 'mobile',
                 'result' => [
                     'otp' => strval($otpData['otp']),
                     'otp_expire_time' => strval($otpData['otp_expire_time']),

@@ -71,145 +71,162 @@ class WebsiteLoginController extends Controller
 
     /**
      * Handle guest user login and store in MainUser table.
+     * Guest OTP is mobile-only (email is optional contact, not OTP channel).
      */
     public function guestLogin(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
             'age' => 'required|integer|min:18',
-            'email' => 'required|email|max:255|unique:main_users,email',
-            'phone' => 'required|string|max:20|unique:main_users,phone',
+            'email' => 'nullable|email|max:255',
+            'phone' => 'required|string|max:20',
+            'phone_code' => 'nullable',
         ]);
 
         if ($validator->fails()) {
             return redirect()->back()->withErrors($validator)->withInput();
         }
 
-        $uniqid = uniqid();
-        $otp = mt_rand(1000, 9999);
-        $otp_expire_time = now()->addMinutes(5);
+        $phone = preg_replace('/\D+/', '', (string) $request->phone);
+        $phoneCode = $request->phone_code ?: '233';
+        $email = !empty($request->email) && filter_var($request->email, FILTER_VALIDATE_EMAIL)
+            ? trim($request->email)
+            : null;
+        $nameParts = preg_split('/\s+/', trim($request->name), 2);
 
+        if (!Helper::isValidCustomerName($request->name)) {
+            return redirect()->back()->withErrors(['name' => 'Please enter a valid real name.'])->withInput();
+        }
+        if (!Helper::isValidCustomerPhone($phone, $phoneCode)) {
+            return redirect()->back()->withErrors(['phone' => 'Please enter a valid mobile number.'])->withInput();
+        }
+
+        $uniqid = uniqid();
         $user = MainUser::create([
             'uniqid' => $uniqid,
             'name' => $request->name,
+            'first_name' => $nameParts[0] ?? $request->name,
+            'last_name' => $nameParts[1] ?? '',
             'age' => $request->age,
-            'email' => $request->email,
-            'phone' => $request->phone,
+            'email' => $email,
+            'phone' => $phone,
+            'phone_code' => $phoneCode,
             'is_guest_user' => true,
             'status' => 2, // Pending verification
             'is_verify_user' => 0,
-            'otp' => $otp,
-            'otp_expire_time' => $otp_expire_time,
+            'is_otp_verify' => 0,
         ]);
 
-        // Send OTP via email (reuse logic from websiteRegister)
-        $logo = \Config::get('app.url') . 'public/assets/dashboard/images/liquor.png';
-        $url_link = \URL::to("/");
-        $url = $url_link . '/';
-        $email = $user->email;
-        $name = $user->name;
-        try {
-            $this->attachment_otp_email($email, $otp, $name, $url, $logo);
-        } catch (\Exception $e) {
-            // Log error if needed
-        }
+        Helper::sendMobileVerificationOtp($user, $phoneCode);
 
-        // Store guest user id in session for OTP verification
+        \Session::put('otp_channel', 'mobile');
+        \Session::put('otp_phone', $phone);
+        \Session::put('email', $email ?: ('guest_' . $user->id . '@temp.local'));
+        \Session::put('first_name', $user->first_name);
+        \Session::put('phone_code', $phoneCode);
+        \Session::put('id', $user->id);
         session(['guest_otp_user_id' => $user->id]);
 
-        // Redirect to guest OTP verification page (create this route/view)
         return redirect()->route('websitesendotp');
     }
+    /**
+     * Activate social user and login (does not force phone verified — keeps profile OTP flow).
+     */
+    private function activateAndLoginSocialUser(MainUser $dbUser, string $providerField, string $providerId, int $socialType): void
+    {
+        $dbUser->{$providerField} = $providerId;
+        $dbUser->is_verify_user = 1;
+        $dbUser->social_type = $socialType;
+        // Pending OTP (2) → active; inactive (0) should not reach here
+        if ((int) $dbUser->status !== 1) {
+            $dbUser->status = 1;
+        }
+        // Do NOT set is_otp_verify=1 here — registered/social users still verify mobile when needed
+        $dbUser->save();
+
+        Auth::guard('user')->login($dbUser);
+        session()->flash('success', 'Login successfully');
+    }
+
+    /**
+     * App-parity social login for web:
+     * 1) Find by provider id (including status=2 pending)
+     * 2) Else same email → link provider id and login (unless linked to a different social account)
+     * 3) Else create new user
+     *
+     * @param object $socialUser Socialite user
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    private function loginOrLinkSocialUser($socialUser, string $providerField, int $socialType)
+    {
+        $providerId = strval($socialUser->id ?? '');
+        $email = !empty($socialUser->email) ? trim((string) $socialUser->email) : null;
+        $name = trim((string) ($socialUser->name ?? ''));
+
+        if ($providerId === '') {
+            session()->flash('error', 'Unable to read social account id. Please try again.');
+            Alert::warning('Warning', 'Social login failed. Please try again.');
+            return redirect()->route('websitelogin');
+        }
+
+        if (empty($email)) {
+            session()->flash('error', 'Social account does not provide an email. Please use another login method.');
+            Alert::warning('Warning', 'Social account missing email.');
+            return redirect()->route('websitelogin');
+        }
+
+        // 1) Already linked (include pending status=2; exclude inactive status=0)
+        $finduser = MainUser::where($providerField, $providerId)
+            ->where('status', '!=', 0)
+            ->orderByDesc('id')
+            ->first();
+
+        if ($finduser) {
+            $this->activateAndLoginSocialUser($finduser, $providerField, $providerId, $socialType);
+            return redirect()->route('frontend.home');
+        }
+
+        // 2) Same email as signup / app social — link and login (matches API social_register)
+        $userExist = MainUser::whereRaw('LOWER(email) = ?', [strtolower($email)])
+            ->where('status', '!=', 0)
+            ->orderByDesc('id')
+            ->first();
+
+        if ($userExist) {
+            // Same verified email as signup/app → always link this provider id and login
+            // (App may store Firebase uid; web Socialite uses Google "sub" — both must work)
+            $this->activateAndLoginSocialUser($userExist, $providerField, $providerId, $socialType);
+            return redirect()->route('frontend.home');
+        }
+
+        // 3) Brand-new social user
+        $nameParts = $name !== '' ? preg_split('/\s+/', $name, 2) : ['', ''];
+        $newUser = MainUser::create([
+            'uniqid' => uniqid(),
+            'email' => $email,
+            'name' => $name,
+            $providerField => $providerId,
+            'is_verify_user' => 1,
+            'status' => 1,
+            'is_otp_verify' => 0,
+            'is_guest_user' => 0,
+            'first_name' => $nameParts[0] ?? '',
+            'last_name' => $nameParts[1] ?? '',
+            'social_type' => $socialType,
+        ]);
+
+        Auth::guard('user')->login($newUser);
+        session()->flash('success', 'Login successfully');
+        return redirect()->route('frontend.home')->with('key', $newUser);
+    }
+
     public function handleGoogleCallback()
     {
-
         try {
-
-
             $user = Socialite::driver('google')->stateless()->user();
-
-            if (empty($user->email) && empty($user->phone)) {
-                session()->flash('error', 'Google account does not provide an email or phone number. Please use another login method.');
-                Alert::warning('Warning', 'Google account missing email or phone number.');
-                return redirect()->route('websitelogin');
-            }
-
-            $finduser = MainUser::where('google_id', $user->id)->where('status', '!=', '2')->first();
-
-            if ($finduser) {
-
-                Auth::guard('user')->login($finduser);
-
-                session()->flash('success', 'Login successfully');
-                return redirect()->route('frontend.home');
-            } else {
-                $userExist = MainUser::where(function ($query) use ($user) {
-                    if (!empty($user->email)) {
-                        $query->where('email', $user->email);
-                    }
-                    if (!empty($user->phone)) {
-                        $query->orWhere('phone', $user->phone);
-                    }
-                })
-                    ->first();
-
-                if ($userExist) {
-                    // Link Google to existing account with same email (no google_id yet)
-                    if (
-                        !empty($user->email)
-                        && strcasecmp((string) $userExist->email, (string) $user->email) === 0
-                        && empty($userExist->google_id)
-                    ) {
-                        $userExist->google_id = $user->id;
-                        $userExist->is_verify_user = 1;
-                        if ((int) $userExist->status !== 1) {
-                            $userExist->status = 1;
-                        }
-                        $userExist->save();
-
-                        Auth::guard('user')->login($userExist);
-                        session()->flash('success', 'Login successfully');
-                        return redirect()->route('frontend.home');
-                    }
-
-                    $errors = [];
-
-                    if (!empty($user->email) && $userExist->email === $user->email) {
-                        $errors['email'] = ['The email address is already registered.'];
-                    }
-
-                    if (!empty($user->phone) && $userExist->phone === $user->phone) {
-                        $errors['phone'] = ['The phone number is already registered.'];
-                    }
-
-                    session()->flash('error', $errors);
-                    Alert::warning('Warning', 'User already exists with this email or phone.');
-                    return redirect()->route('websitelogin');
-                }
-
-                $uniqid = uniqid();
-                $nameParts = explode(' ', $user->name);
-                $firstName = $nameParts[0];
-                $lastName = isset($nameParts[1]) ? $nameParts[1] : '';
-
-                $newUser = MainUser::create([
-                    'uniqid' => $uniqid,
-                    'email' => $user->email,
-                    'name' => $user->name,
-                    'google_id' => $user->id,
-                    'is_verify_user' => 1,
-                    'status' => 1,
-                    'first_name' => $firstName,
-                    'last_name' => $lastName,
-                    'social_type' => 1,
-                ]);
-
-                Auth::guard('user')->login($newUser);
-                session()->flash('success', 'Login successfully');
-                return redirect()->route('frontend.home')->with('key', $newUser);
-            }
-        } catch (Exception $e) {
-            // dd($e->getMessage());
+            return $this->loginOrLinkSocialUser($user, 'google_id', 1);
+        } catch (\Exception $e) {
+            logger()->error('Google social login failed: ' . $e->getMessage());
             session()->flash('error', 'Something went wrong. Please try again.');
             return redirect()->route('websitelogin');
         }
@@ -222,92 +239,11 @@ class WebsiteLoginController extends Controller
 
     public function handleFacebookCallback()
     {
-
         try {
             $user = Socialite::driver('facebook')->stateless()->user();
-
-            if (empty($user->email) && empty($user->phone)) {
-                session()->flash('error', 'Facebook account does not provide an email or phone number. Please use another login method.');
-                Alert::warning('Warning', 'Facebook account missing email or phone number.');
-                return redirect()->route('websitelogin');
-            }
-
-            $finduser = MainUser::where('facebook_id', $user->id)->where('status', '!=', '2')->first();
-
-            if ($finduser) {
-                Auth::guard('user')->login($finduser);
-                session()->flash('success', 'Login successfully');
-                return redirect()->route('frontend.home');
-            } else {
-
-                $userExist = MainUser::where(function ($query) use ($user) {
-                    if (!empty($user->email)) {
-                        $query->where('email', $user->email);
-                    }
-                    if (!empty($user->phone)) {
-                        $query->orWhere('phone', $user->phone);
-                    }
-                })
-                    ->first();
-
-                if ($userExist) {
-                    // Link Facebook to existing account with same email (no facebook_id yet)
-                    if (
-                        !empty($user->email)
-                        && strcasecmp((string) $userExist->email, (string) $user->email) === 0
-                        && empty($userExist->facebook_id)
-                    ) {
-                        $userExist->facebook_id = $user->id;
-                        $userExist->is_verify_user = 1;
-                        if ((int) $userExist->status !== 1) {
-                            $userExist->status = 1;
-                        }
-                        $userExist->save();
-
-                        Auth::guard('user')->login($userExist);
-                        session()->flash('success', 'Login successfully');
-                        return redirect()->route('frontend.home');
-                    }
-
-                    $errors = [];
-
-                    if (!empty($user->email) && $userExist->email === $user->email) {
-                        $errors['email'] = ['The email address is already registered.'];
-                    }
-
-                    if (!empty($user->phone) && $userExist->phone === $user->phone) {
-                        $errors['phone'] = ['The phone number is already registered.'];
-                    }
-
-                    session()->flash('error', $errors);
-                    Alert::warning('Warning', 'User already exists with this email or phone.');
-                    return redirect()->route('websitelogin');
-                }
-
-                $uniqid = uniqid();
-                $nameParts = explode(' ', $user->name);
-                $firstName = $nameParts[0];
-                $lastName = isset($nameParts[1]) ? $nameParts[1] : '';
-
-                $newUser = MainUser::create([
-
-                    'uniqid' => $uniqid,
-                    'email' => $user->email,
-                    'name' => $user->name,
-                    'facebook_id' => $user->id,
-                    'is_verify_user' => 1,
-                    'status' => 1,
-                    'first_name' => $firstName,
-                    'last_name' => $lastName,
-                    'social_type' => 2,
-                ]);
-
-                Auth::guard('user')->login($newUser);
-                session()->flash('success', 'Login successfully');
-                return redirect()->route('frontend.home');
-            }
-        } catch (Exception $e) {
-            // dd($e->getMessage());
+            return $this->loginOrLinkSocialUser($user, 'facebook_id', 2);
+        } catch (\Exception $e) {
+            logger()->error('Facebook social login failed: ' . $e->getMessage());
             session()->flash('error', 'Something went wrong. Please try again.');
             return redirect()->route('websitelogin');
         }
@@ -320,76 +256,11 @@ class WebsiteLoginController extends Controller
 
     public function handleAppleCallback()
     {
-
         try {
-
             $appleUser = Socialite::driver('apple')->stateless()->user();
-
-            if (empty($appleUser->email) && empty($appleUser->phone)) {
-                session()->flash('error', 'Apple account does not provide an email or phone number. Please use another login method.');
-                Alert::warning('Warning', 'Apple account missing email or phone number.');
-                return redirect()->route('websitelogin');
-            }
-
-            $finduser = MainUser::where('apple_id', $appleUser->id)->where('status', '!=', '2')->first();
-            if ($finduser) {
-
-                Auth::guard('user')->login($finduser);
-
-                session()->flash('success', 'Login successfully');
-                return redirect()->route('frontend.home');
-            } else {
-
-                $userExist = MainUser::where(function ($query) use ($appleUser) {
-                    if (!empty($appleUser->email)) {
-                        $query->where('email', $appleUser->email);
-                    }
-                    if (!empty($appleUser->phone)) {
-                        $query->orWhere('phone', $appleUser->phone);
-                    }
-                })
-                    ->first();
-
-                if ($userExist) {
-                    $errors = [];
-
-                    if (!empty($appleUser->email) && $userExist->email === $appleUser->email) {
-                        $errors['email'] = ['The email address is already registered.'];
-                    }
-
-                    if (!empty($appleUser->phone) && $userExist->phone === $appleUser->phone) {
-                        $errors['phone'] = ['The phone number is already registered.'];
-                    }
-
-                    session()->flash('error', $errors);
-                    Alert::warning('Warning', 'User already exists with this email or phone.');
-                    return redirect()->route('websitelogin');
-                }
-
-
-                $uniqid = uniqid();
-                $nameParts = explode(' ', $appleUser->name);
-                $firstName = $nameParts[0];
-                $lastName = isset($nameParts[1]) ? $nameParts[1] : '';
-
-                $newUser = MainUser::create([
-                    'uniqid' => $uniqid,
-                    'email' => $appleUser->email,
-                    'name' => $appleUser->name,
-                    'apple_id' => $appleUser->id,
-                    'is_verify_user' => 1,
-                    'status' => 1,
-                    'first_name' => $firstName,
-                    'last_name' => $lastName,
-                    'social_type' => 3,
-                ]);
-
-                Auth::guard('user')->login($newUser);
-
-                session()->flash('success', 'Login successfully');
-                return redirect()->route('frontend.home')->with('key', $newUser);
-            }
-        } catch (Exception $e) {
+            return $this->loginOrLinkSocialUser($appleUser, 'apple_id', 3);
+        } catch (\Exception $e) {
+            logger()->error('Apple social login failed: ' . $e->getMessage());
             session()->flash('error', 'Something went wrong. Please try again.');
             return redirect()->route('websitelogin');
         }
@@ -590,6 +461,7 @@ class WebsiteLoginController extends Controller
                         return response()->json([
                             'success' => 'true',
                             'guest_otp' => true,
+                            'otp_channel' => 'mobile',
                             'redirect' => route('websitesendotp')
                         ]);
                     }
@@ -698,10 +570,11 @@ class WebsiteLoginController extends Controller
                     \Session::put('phone_code', $phoneCode);
                     \Session::put('id', $user->id);
 
-                    // Guest continue: mobile OTP
+                    // Guest continue: mobile OTP only (email is optional, not OTP channel)
                     return response()->json([
                         'success' => 'true',
                         'guest_otp' => true,
+                        'otp_channel' => 'mobile',
                         'redirect' => route('websitesendotp')
                     ]);
             }
